@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Edit3, Check, RefreshCw, BookmarkPlus, Sparkles, Zap, Radio } from 'lucide-react';
 import { LyricLine, TrackMetadata } from '../types';
+import { audioEngine } from '../utils/audioEngine';
 
 interface LyricTeleprompterProps {
   currentTrack: TrackMetadata | null;
@@ -14,46 +15,60 @@ export function parseLrcString(lrcContent: string): LyricLine[] {
   if (!lrcContent || typeof lrcContent !== 'string') return [];
 
   const lines = lrcContent.split('\n');
-  const result: LyricLine[] = [];
-  const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
+  const rawParsed: { timeSec: number; text: string }[] = [];
+  const timeRegex = /\[(\d{1,2}):(\d{2})(?:[\.:](\d{2,3}))?\]/g;
 
-  lines.forEach((line, index) => {
+  lines.forEach((line) => {
     const times: number[] = [];
     let match: RegExpExecArray | null;
 
-    // Extract all [mm:ss.xx] timestamps in the line
+    timeRegex.lastIndex = 0;
     while ((match = timeRegex.exec(line)) !== null) {
       const minutes = parseInt(match[1], 10);
       const seconds = parseInt(match[2], 10);
-      const sub = match[3];
-      const ms = sub.length === 2 ? parseInt(sub, 10) * 10 : parseInt(sub, 10);
+      const sub = match[3] || '0';
+      let ms = 0;
+      if (sub.length === 1) ms = parseInt(sub, 10) * 100;
+      else if (sub.length === 2) ms = parseInt(sub, 10) * 10;
+      else if (sub.length === 3) ms = parseInt(sub, 10);
+
       const totalSeconds = minutes * 60 + seconds + ms / 1000;
       times.push(totalSeconds);
     }
 
-    // Clean lyrics line text
-    const text = line.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
+    const text = line.replace(/\[\d{1,2}:\d{2}(?:[\.:]\d{2,3})?\]/g, '').trim();
 
-    if (text && times.length > 0) {
+    if (text) {
       times.forEach((timeSec) => {
-        const timeMs = Math.round(timeSec * 1000);
-        const wordsArr = text.split(' ').map((w, wIdx) => ({
-          word: w,
-          timeMs: timeMs + wIdx * 320,
-        }));
-
-        result.push({
-          id: `lrc-${index}-${timeMs}`,
-          time: timeSec,
-          timeMs,
-          text,
-          words: wordsArr,
-        });
+        rawParsed.push({ timeSec, text });
       });
     }
   });
 
-  return result.sort((a, b) => a.time - b.time);
+  rawParsed.sort((a, b) => a.timeSec - b.timeSec);
+
+  return rawParsed.map((item, index) => {
+    const nextItem = rawParsed[index + 1];
+    const lineGap = nextItem ? Math.min(10, Math.max(2, nextItem.timeSec - item.timeSec)) : 4;
+    const words = item.text.split(' ').filter((w) => w.length > 0);
+    const timeMs = Math.round(item.timeSec * 1000);
+
+    const activeSingingDuration = lineGap * 0.75;
+    const msPerWord = words.length > 0 ? (activeSingingDuration * 1000) / words.length : 300;
+
+    const wordsArr = words.map((w, wIdx) => ({
+      word: w,
+      timeMs: Math.round(timeMs + wIdx * msPerWord),
+    }));
+
+    return {
+      id: `lrc-${index}-${timeMs}`,
+      time: item.timeSec,
+      timeMs,
+      text: item.text,
+      words: wordsArr,
+    };
+  });
 }
 
 export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
@@ -76,8 +91,11 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   // Frame-perfect requestAnimationFrame loop polling audio time continuously
   useEffect(() => {
     const syncLoop = () => {
-      const audioTime = audioRef?.current ? audioRef.current.currentTime : currentTime;
-      setExactMs(Math.round(audioTime * 1000));
+      const elTime = audioRef?.current?.currentTime || 0;
+      const engineTime = audioEngine.getCurrentTime();
+      const activeTime = elTime > 0 ? elTime : (audioEngine.getIsPlaying() ? engineTime : currentTime);
+
+      setExactMs(Math.round(activeTime * 1000));
       animFrameRef.current = requestAnimationFrame(syncLoop);
     };
 
@@ -182,9 +200,12 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   // Auto-scroll centered line smoothly into view
   useEffect(() => {
     if (activeLineRef.current && containerRef.current) {
-      activeLineRef.current.scrollIntoView({
+      const container = containerRef.current;
+      const activeEl = activeLineRef.current;
+      const targetScrollTop = activeEl.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2;
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
         behavior: 'smooth',
-        block: 'center',
       });
     }
   }, [activeLineIndex]);
