@@ -96,10 +96,24 @@ export default function App() {
 
       audioEngine.setAudioBuffer(audioBuffer);
 
+      const cleanFileName = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+      let trackName = cleanFileName;
+      let artistName = 'Uploaded Artist';
+
+      if (cleanFileName.includes(' - ')) {
+        const parts = cleanFileName.split(' - ');
+        artistName = parts[0].trim();
+        trackName = parts.slice(1).join(' - ').trim();
+      } else if (cleanFileName.includes('-')) {
+        const parts = cleanFileName.split('-');
+        artistName = parts[0].trim();
+        trackName = parts.slice(1).join('-').trim();
+      }
+
       const meta: TrackMetadata = {
         id: `file_${Date.now()}`,
-        name: file.name.replace(/\.[^/.]+$/, ''),
-        artist: 'Uploaded File',
+        name: trackName,
+        artist: artistName,
         duration: audioBuffer.duration,
         sampleRate: audioBuffer.sampleRate,
         numberOfChannels: audioBuffer.numberOfChannels,
@@ -109,6 +123,9 @@ export default function App() {
       setCurrentTrack(meta);
       setDuration(audioBuffer.duration);
       setCurrentTime(0);
+
+      await audioEngine.play(settings, isOriginal);
+      setIsPlaying(true);
     } catch (err) {
       console.error('Error decoding audio file:', err);
       alert('Could not decode audio file. Please ensure it is a valid MP3, WAV, FLAC, or OGG file.');
@@ -123,7 +140,7 @@ export default function App() {
     setIsPlaying(false);
 
     try {
-      console.log('Sending track request to backend Demucs AI pipeline...');
+      console.log('Sending track request to backend audio search pipeline...');
       const res = await fetch('/api/process-track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,8 +157,25 @@ export default function App() {
         await ctx.resume();
       }
 
-      // Generate pristine full-song audio buffer with harmonics, bass & melody
-      const buffer = createFullSongDemo(ctx, trackTitle, artistName, durationSec);
+      let buffer: AudioBuffer | null = null;
+      if (data?.audioUrl) {
+        try {
+          console.log('Fetching master audio recording stream:', data.audioUrl);
+          const audioRes = await fetch(data.audioUrl);
+          if (audioRes.ok) {
+            const arrayBuffer = await audioRes.arrayBuffer();
+            buffer = await ctx.decodeAudioData(arrayBuffer);
+            console.log('Successfully decoded master audio track, duration:', buffer.duration);
+          }
+        } catch (fetchErr) {
+          console.warn('Direct master audio stream fetch notice:', fetchErr);
+        }
+      }
+
+      if (!buffer) {
+        buffer = createFullSongDemo(ctx, trackTitle, artistName, durationSec);
+      }
+
       audioEngine.setAudioBuffer(buffer);
 
       const meta: TrackMetadata = {
@@ -154,7 +188,7 @@ export default function App() {
         youtubeUrl: url,
         isYoutubeImport: true,
         copyrightCleared: true,
-        gMixVersion: 'Karaoke G-Mix AI Master',
+        gMixVersion: 'Karaoke Master Recording',
       };
 
       setCurrentTrack(meta);

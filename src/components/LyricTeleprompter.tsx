@@ -71,6 +71,19 @@ export function parseLrcString(lrcContent: string): LyricLine[] {
   });
 }
 
+function sanitizeTrackQuery(input: string): string {
+  if (!input) return '';
+  return input
+    .replace(/\.[^/.]+$/, '')
+    .replace(/^(yt_|file_)\d+_/i, '')
+    .replace(/\(Official (Music )?Video\)/gi, '')
+    .replace(/\[Official (Music )?Video\]/gi, '')
+    .replace(/\[(4K|HD|HQ)\]/gi, '')
+    .replace(/\b(Official Audio|Audio|Video|Remastered|Studio Track|Uploaded Artist|Studio Master)\b/gi, '')
+    .replace(/[_\-]+/g, ' ')
+    .trim();
+}
+
 export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   currentTrack,
   currentTime,
@@ -109,10 +122,12 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   const fetchLrclibLyrics = async (trackName: string, artistName?: string) => {
     setIsFetchingLyrics(true);
     try {
-      // 1. Query LRCLIB Public API
-      let searchQuery = trackName;
-      if (artistName && !trackName.toLowerCase().includes(artistName.toLowerCase())) {
-        searchQuery = `${artistName} ${trackName}`;
+      const cleanTrack = sanitizeTrackQuery(trackName);
+      const cleanArtist = sanitizeTrackQuery(artistName || '');
+
+      let searchQuery = cleanTrack;
+      if (cleanArtist && !cleanTrack.toLowerCase().includes(cleanArtist.toLowerCase())) {
+        searchQuery = `${cleanArtist} ${cleanTrack}`.trim();
       }
 
       console.log('Fetching synchronized lyrics from LRCLIB API for:', searchQuery);
@@ -163,7 +178,7 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
       }
 
       // 2. Fallback to Enterprise Synced Lyrics Database
-      const res = await fetch(`/api/lyrics/sync?title=${encodeURIComponent(trackName)}`);
+      const res = await fetch(`/api/lyrics/sync?title=${encodeURIComponent(cleanTrack)}&artist=${encodeURIComponent(cleanArtist)}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.lyrics)) {
         const formatted: LyricLine[] = data.lyrics.map((item: any, idx: number) => ({
