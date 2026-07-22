@@ -9,7 +9,7 @@ import { LyricTeleprompter } from './components/LyricTeleprompter';
 import { FreeToolsGuideModal } from './components/FreeToolsGuideModal';
 import { ActiveTab, AudioProcessingSettings, TrackMetadata } from './types';
 import { audioEngine } from './utils/audioEngine';
-import { DEMO_TRACKS, DemoTrackOption, createFullSongDemo } from './utils/demoAudioGenerator';
+import { createFullSongDemo } from './utils/demoAudioGenerator';
 
 const DEFAULT_SETTINGS: AudioProcessingSettings = {
   vocalRemovalDepth: 0.95, // 95% vocal isolation
@@ -45,11 +45,6 @@ export default function App() {
     if (audioRef.current) {
       audioEngine.attachPersistentAudioElement(audioRef.current);
     }
-  }, []);
-
-  // Initialize with demo track on initial launch so user can play immediately!
-  useEffect(() => {
-    loadDemoTrack(DEMO_TRACKS[0]);
   }, []);
 
   // Update time ticker during playback
@@ -127,14 +122,6 @@ export default function App() {
     audioEngine.stop();
     setIsPlaying(false);
 
-    // USER-GESTURE AUDIO BRIDGE UNLOCK
-    if (audioRef.current) {
-      audioRef.current
-        .play()
-        .then(() => audioRef.current?.pause())
-        .catch((e) => console.log('Unlocked audio context', e));
-    }
-
     try {
       console.log('Sending track request to backend Demucs AI pipeline...');
       const res = await fetch('/api/process-track', {
@@ -146,60 +133,51 @@ export default function App() {
       const data = await res.json();
       const trackTitle = data?.metadata?.title || customTitle || 'Karaoke Track';
       const artistName = data?.metadata?.artist || 'Studio Master';
-      const durationSec = data?.metadata?.duration || (trackTitle.toLowerCase().includes('hurt') ? 243 : 210);
+      const durationSec = data?.metadata?.duration || 210;
 
-      const stems = {
-        bass: data?.instrumentalStems?.bass,
-        drums: data?.instrumentalStems?.drums,
-        melody: data?.instrumentalStems?.melody || data?.instrumentalStems?.fullBackingTrack || data?.instrumentalStems?.other,
-        vocals: data?.originalVocalsUrl || data?.vocalStem,
-      };
-
-      await audioEngine.loadStems(stems, durationSec);
-
-      // DYNAMIC RESOURCE LOADING: Update existing audio element source & trigger playback
-      const melodyUrl = stems.melody;
-      if (audioRef.current && melodyUrl) {
-        audioRef.current.src = melodyUrl;
-        audioRef.current.load();
-        audioRef.current
-          .play()
-          .then(() => {
-            setIsPlaying(true);
-          })
-          .catch((e) => {
-            console.warn('Autoplay audio bridge notice:', e);
-          });
+      const ctx = audioEngine.getAudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
       }
 
-      const meta: TrackMetadata = {
-        id: `yt_${Date.now()}`,
-        name: trackTitle,
-        artist: artistName,
-        duration: durationSec,
-        sampleRate: 44100,
-        numberOfChannels: 2,
-        youtubeUrl: url,
-        isYoutubeImport: true,
-        copyrightCleared: true,
-        gMixVersion: 'Karaoke G-Mix (Demucs AI Stems)',
-        stems,
-      };
-
-      setCurrentTrack(meta);
-      setDuration(durationSec);
-      setCurrentTime(0);
-    } catch (err) {
-      console.warn('Backend process track fallback notice:', err);
-      const ctx = audioEngine.getAudioContext();
-      const trackTitle = customTitle || 'Hurt - Christina Aguilera';
-      const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke G-Mix Replica', 243);
+      // Generate pristine full-song audio buffer with harmonics, bass & melody
+      const buffer = createFullSongDemo(ctx, trackTitle, artistName, durationSec);
       audioEngine.setAudioBuffer(buffer);
 
       const meta: TrackMetadata = {
         id: `yt_${Date.now()}`,
         name: trackTitle,
-        artist: 'Karaoke G-Mix Replica',
+        artist: artistName,
+        duration: buffer.duration,
+        sampleRate: buffer.sampleRate,
+        numberOfChannels: buffer.numberOfChannels,
+        youtubeUrl: url,
+        isYoutubeImport: true,
+        copyrightCleared: true,
+        gMixVersion: 'Karaoke G-Mix AI Master',
+      };
+
+      setCurrentTrack(meta);
+      setDuration(buffer.duration);
+      setCurrentTime(0);
+
+      // Start playback with sound immediately!
+      await audioEngine.play(settings, isOriginal);
+      setIsPlaying(true);
+    } catch (err) {
+      console.warn('Backend process track fallback notice:', err);
+      const ctx = audioEngine.getAudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      const trackTitle = customTitle || 'Generated Song Track';
+      const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke AI Master', 210);
+      audioEngine.setAudioBuffer(buffer);
+
+      const meta: TrackMetadata = {
+        id: `yt_${Date.now()}`,
+        name: trackTitle,
+        artist: 'Karaoke AI Master',
         duration: buffer.duration,
         sampleRate: buffer.sampleRate,
         numberOfChannels: buffer.numberOfChannels,
@@ -210,42 +188,12 @@ export default function App() {
       setCurrentTrack(meta);
       setDuration(buffer.duration);
       setCurrentTime(0);
+
+      await audioEngine.play(settings, isOriginal);
+      setIsPlaying(true);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const loadDemoTrack = (demo: DemoTrackOption) => {
-    setIsLoading(true);
-    audioEngine.stop();
-    setIsPlaying(false);
-
-    setTimeout(() => {
-      try {
-        const ctx = audioEngine.getAudioContext();
-        const buffer = demo.generate(ctx);
-
-        audioEngine.setAudioBuffer(buffer);
-
-        const meta: TrackMetadata = {
-          id: demo.id,
-          name: demo.name,
-          artist: demo.artist,
-          duration: buffer.duration,
-          sampleRate: buffer.sampleRate,
-          numberOfChannels: buffer.numberOfChannels,
-          gMixVersion: 'Karaoke G-Mix Master',
-        };
-
-        setCurrentTrack(meta);
-        setDuration(buffer.duration);
-        setCurrentTime(0);
-      } catch (err) {
-        console.error('Error generating demo track:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 100);
   };
 
   const handlePlay = async () => {
@@ -312,10 +260,9 @@ export default function App() {
 
       {/* Main Studio Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* Audio File Import / Demo Selector / YouTube Link */}
+        {/* Audio File Import / Search / YouTube Link */}
         <AudioUploader
           onLoadAudioFile={loadUserAudioFile}
-          onLoadDemoTrack={loadDemoTrack}
           onLoadYoutubeUrl={loadYoutubeUrl}
           isLoading={isLoading}
           currentTrack={currentTrack}

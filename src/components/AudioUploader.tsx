@@ -1,11 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { Upload, Music, Play, Sparkles, Check, Youtube, ArrowRight, ShieldCheck, Search } from 'lucide-react';
-import { DEMO_TRACKS, DemoTrackOption } from '../utils/demoAudioGenerator';
+import { Upload, Sparkles, Youtube, ArrowRight, Search } from 'lucide-react';
 import { TrackMetadata } from '../types';
 
 interface AudioUploaderProps {
   onLoadAudioFile: (file: File) => void;
-  onLoadDemoTrack: (demo: DemoTrackOption) => void;
   onLoadYoutubeUrl: (url: string, title?: string) => void;
   isLoading: boolean;
   currentTrack: TrackMetadata | null;
@@ -14,7 +12,6 @@ interface AudioUploaderProps {
 
 export const AudioUploader: React.FC<AudioUploaderProps> = ({
   onLoadAudioFile,
-  onLoadDemoTrack,
   onLoadYoutubeUrl,
   isLoading,
   currentTrack,
@@ -22,7 +19,6 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedDemoId, setSelectedDemoId] = useState<string>('pop_groove');
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [youtubeTitle, setYoutubeTitle] = useState<string>('');
   const [artistInput, setArtistInput] = useState<string>('');
@@ -187,9 +183,9 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
         </form>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
+      <div className="grid grid-cols-1 gap-5 items-center">
         {/* Upload Dropzone */}
-        <div className="lg:col-span-7">
+        <div>
           <input
             type="file"
             ref={fileInputRef}
@@ -202,7 +198,7 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[120px] ${
+            className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[110px] ${
               isDragging
                 ? 'border-cyan-400 bg-cyan-950/30 scale-[0.99]'
                 : 'border-slate-700/80 bg-slate-950/60 hover:border-cyan-500/50 hover:bg-slate-900/60'
@@ -217,52 +213,6 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
             <p className="text-[11px] text-slate-400">
               Upload MP3, WAV, FLAC, OGG • 100% Free
             </p>
-          </div>
-        </div>
-
-        {/* Demo Songs Picker */}
-        <div className="lg:col-span-5 bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between h-full">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Test With Demo Tracks</span>
-              </div>
-              <span className="text-[10px] text-slate-500">Instant Test</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-1.5">
-              {DEMO_TRACKS.map((demo) => {
-                const isSelected = selectedDemoId === demo.id;
-                return (
-                  <button
-                    key={demo.id}
-                    onClick={() => {
-                      setSelectedDemoId(demo.id);
-                      onLoadDemoTrack(demo);
-                    }}
-                    className={`flex items-center justify-between p-2 rounded-lg text-left transition-all text-xs ${
-                      isSelected
-                        ? 'bg-cyan-950/60 border border-cyan-500/50 text-cyan-200'
-                        : 'bg-slate-900/50 border border-slate-800 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <Music className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-cyan-400' : 'text-slate-500'}`} />
-                      <div className="truncate">
-                        <div className="font-semibold text-slate-200 truncate">{demo.name}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{demo.artist}</div>
-                      </div>
-                    </div>
-                    {isSelected ? (
-                      <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                    ) : (
-                      <Play className="w-3 h-3 text-slate-500 shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
       </div>

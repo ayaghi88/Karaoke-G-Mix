@@ -316,25 +316,59 @@ Provide complete lines covering full 3-5 minute song structure. Return ONLY vali
 
       return res.end(chunkBuffer);
     } else {
+      // Return a lightweight 15-second WAV header + audio payload
+      const streamDuration = 15;
+      const streamDataSize = streamDuration * byteRate;
+      const streamTotalSize = 44 + streamDataSize;
+
+      const fullBuffer = Buffer.alloc(streamTotalSize);
+      fullBuffer.write('RIFF', 0);
+      fullBuffer.writeUInt32LE(streamTotalSize - 8, 4);
+      fullBuffer.write('WAVE', 8);
+      fullBuffer.write('fmt ', 12);
+      fullBuffer.writeUInt32LE(16, 16);
+      fullBuffer.writeUInt16LE(1, 20); // PCM
+      fullBuffer.writeUInt16LE(numChannels, 22);
+      fullBuffer.writeUInt32LE(sampleRate, 24);
+      fullBuffer.writeUInt32LE(byteRate, 28);
+      fullBuffer.writeUInt16LE(blockAlign, 32);
+      fullBuffer.writeUInt16LE(16, 34);
+      fullBuffer.write('data', 36);
+      fullBuffer.writeUInt32LE(streamDataSize, 40);
+
+      const bpm = isHurt ? 72 : 112;
+      const beatSec = 60 / bpm;
+      const chordFreqs = [220, 174.61, 261.63, 196]; // Am, F, C, G
+
+      for (let fileBytePos = 44; fileBytePos < streamTotalSize; fileBytePos += blockAlign) {
+        const sampleIdx = Math.floor((fileBytePos - 44) / blockAlign);
+        const t = sampleIdx / sampleRate;
+
+        const chordIdx = Math.floor((t / (beatSec * 4)) % chordFreqs.length);
+        const freq = chordFreqs[chordIdx];
+
+        const pianoHarmonic = Math.sin(2 * Math.PI * freq * t) * 0.4 + Math.sin(2 * Math.PI * freq * 2 * t) * 0.2;
+        const stringsHarmonic = Math.sin(2 * Math.PI * (freq * 1.5) * t) * 0.15;
+
+        let env = 0.8;
+        if (t < 2) env = 0.4 + (t / 2) * 0.4;
+        if (t > streamDuration - 2) env = Math.max(0, (streamDuration - t) / 2);
+
+        const sampleVal = Math.floor((pianoHarmonic + stringsHarmonic) * env * 16000);
+        const clamped = Math.max(-32768, Math.min(32767, sampleVal));
+
+        const offset = fileBytePos;
+        fullBuffer.writeInt16LE(clamped, offset);
+        if (offset + 2 < streamTotalSize) {
+          fullBuffer.writeInt16LE(clamped, offset + 2);
+        }
+      }
+
       res.writeHead(200, {
-        'Content-Length': totalSize,
+        'Content-Length': streamTotalSize,
         'Content-Type': 'audio/wav',
       });
-      const header = Buffer.alloc(44);
-      header.write('RIFF', 0);
-      header.writeUInt32LE(totalSize - 8, 4);
-      header.write('WAVE', 8);
-      header.write('fmt ', 12);
-      header.writeUInt32LE(16, 16);
-      header.writeUInt16LE(1, 20);
-      header.writeUInt16LE(numChannels, 22);
-      header.writeUInt32LE(sampleRate, 24);
-      header.writeUInt32LE(byteRate, 28);
-      header.writeUInt16LE(blockAlign, 32);
-      header.writeUInt16LE(16, 34);
-      header.write('data', 36);
-      header.writeUInt32LE(dataSize, 40);
-      res.write(header);
+      return res.end(fullBuffer);
     }
   });
 
