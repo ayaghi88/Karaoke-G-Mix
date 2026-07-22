@@ -33,6 +33,13 @@ export class KaraokeAudioEngine {
   private bufferSourceNode: AudioBufferSourceNode | null = null;
   private bufferStartTime: number = 0;
 
+  // DSP Vocal Removal Nodes
+  private directGain: GainNode | null = null;
+  private vocalRemovedGain: GainNode | null = null;
+  private notchFilter: BiquadFilterNode | null = null;
+  private bassGain: GainNode | null = null;
+  private trebleFilter: BiquadFilterNode | null = null;
+
   constructor() {
     // Lazily initialized on user interaction
   }
@@ -233,6 +240,76 @@ export class KaraokeAudioEngine {
     this.onEndedCallback = cb;
   }
 
+  private connectSourceToDSPGraph(
+    sourceNode: AudioNode,
+    settings: AudioProcessingSettings,
+    isOriginal: boolean
+  ) {
+    const ctx = this.getAudioContext();
+    this.initMasterNodes();
+
+    if (!this.masterGain) return;
+
+    // 1. Direct path for Original Song
+    this.directGain = ctx.createGain();
+    this.directGain.gain.setValueAtTime(isOriginal ? 1.0 : 0.0, ctx.currentTime);
+    sourceNode.connect(this.directGain);
+    this.directGain.connect(this.masterGain);
+
+    // 2. Vocal Removal Path for Karaoke Instrumental Mode
+    this.vocalRemovedGain = ctx.createGain();
+    const targetRemGain = isOriginal ? 0.0 : Math.min(1.0, settings.vocalRemovalDepth || 0.95);
+    this.vocalRemovedGain.gain.setValueAtTime(targetRemGain, ctx.currentTime);
+
+    // Splitter into Left (0) and Right (1) channels
+    const splitter = ctx.createChannelSplitter(2);
+    sourceNode.connect(splitter);
+
+    // Invert Right channel phase
+    const rightInverter = ctx.createGain();
+    rightInverter.gain.setValueAtTime(-1.0, ctx.currentTime);
+    splitter.connect(rightInverter, 1);
+
+    // Subtractor merger: L + (-R) = L - R (cancels center-panned vocals)
+    const subtractorMerger = ctx.createChannelMerger(2);
+    splitter.connect(subtractorMerger, 0, 0);       // Left channel -> Left
+    rightInverter.connect(subtractorMerger, 0, 0);  // -Right channel -> Left
+    splitter.connect(subtractorMerger, 0, 1);       // Left channel -> Right
+    rightInverter.connect(subtractorMerger, 0, 1);  // -Right channel -> Right
+
+    // Vocal Notch Filter
+    this.notchFilter = ctx.createBiquadFilter();
+    this.notchFilter.type = 'notch';
+    this.notchFilter.frequency.setValueAtTime(settings.vocalNotchFreq || 1100, ctx.currentTime);
+    this.notchFilter.Q.setValueAtTime(settings.vocalNotchQ || 1.8, ctx.currentTime);
+    subtractorMerger.connect(this.notchFilter);
+
+    // Treble Air Boost Filter
+    this.trebleFilter = ctx.createBiquadFilter();
+    this.trebleFilter.type = 'highshelf';
+    this.trebleFilter.frequency.setValueAtTime(6000, ctx.currentTime);
+    const trebleDb = (settings.trebleBoost || 0.35) * 6;
+    this.trebleFilter.gain.setValueAtTime(trebleDb, ctx.currentTime);
+    this.notchFilter.connect(this.trebleFilter);
+    this.trebleFilter.connect(this.vocalRemovedGain);
+
+    // Sub-Bass Preservation Path (< 180Hz)
+    const bassFilter = ctx.createBiquadFilter();
+    bassFilter.type = 'lowpass';
+    bassFilter.frequency.setValueAtTime(180, ctx.currentTime);
+    bassFilter.Q.setValueAtTime(0.707, ctx.currentTime);
+
+    this.bassGain = ctx.createGain();
+    const bassLevel = settings.bassPreservation !== undefined ? settings.bassPreservation : 0.85;
+    this.bassGain.gain.setValueAtTime(bassLevel, ctx.currentTime);
+
+    sourceNode.connect(bassFilter);
+    bassFilter.connect(this.bassGain);
+    this.bassGain.connect(this.vocalRemovedGain);
+
+    this.vocalRemovedGain.connect(this.masterGain);
+  }
+
   /**
    * Master playback function triggered directly on user button click gesture.
    */
@@ -248,6 +325,14 @@ export class KaraokeAudioEngine {
     this.initMasterNodes();
     this.isOriginalSolo = isOriginal;
 
+    // Update gain states for DSP nodes
+    if (this.directGain) {
+      this.directGain.gain.setValueAtTime(isOriginal ? 1.0 : 0.0, ctx.currentTime);
+    }
+    if (this.vocalRemovedGain) {
+      this.vocalRemovedGain.gain.setValueAtTime(isOriginal ? 0.0 : Math.min(1.0, settings.vocalRemovalDepth || 0.95), ctx.currentTime);
+    }
+
     if (this.vocalsAudio && this.vocalsGain) {
       this.vocalsGain.gain.value = isOriginal ? 1.0 : 0.0;
       this.vocalsAudio.volume = isOriginal ? 1.0 : 0.0;
@@ -257,7 +342,7 @@ export class KaraokeAudioEngine {
     }
 
     if (this.audioBuffer) {
-      this.playFallbackBuffer(settings);
+      this.playFallbackBuffer(settings, isOriginal);
       this.isPlaying = true;
       return;
     }
@@ -275,7 +360,7 @@ export class KaraokeAudioEngine {
     }
   }
 
-  private playFallbackBuffer(settings: AudioProcessingSettings) {
+  private playFallbackBuffer(settings: AudioProcessingSettings, isOriginal: boolean = false) {
     if (!this.audioBuffer) return;
     const ctx = this.getAudioContext();
 
@@ -285,9 +370,8 @@ export class KaraokeAudioEngine {
     this.bufferSourceNode.buffer = this.audioBuffer;
     this.bufferSourceNode.playbackRate.value = settings.playbackRate;
 
-    if (this.masterGain) {
-      this.bufferSourceNode.connect(this.masterGain);
-    }
+    // Connect source through live DSP vocal removal graph
+    this.connectSourceToDSPGraph(this.bufferSourceNode, settings, isOriginal);
 
     const offset = this.pausedAt % this.audioBuffer.duration;
     this.bufferStartTime = ctx.currentTime - offset;
@@ -363,13 +447,13 @@ export class KaraokeAudioEngine {
   }
 
   public getCurrentTime(): number {
-    if (this.singleAudio && !isNaN(this.singleAudio.currentTime) && this.singleAudio.currentTime > 0) {
-      return this.singleAudio.currentTime;
+    if (this.bufferSourceNode && this.isPlaying && this.audioCtx && this.audioBuffer) {
+      const elapsed = this.audioCtx.currentTime - this.bufferStartTime;
+      return Math.min(Math.max(0, elapsed), this.audioBuffer.duration);
     }
 
-    if (this.audioBuffer && this.isPlaying && this.audioCtx) {
-      const elapsed = this.audioCtx.currentTime - this.bufferStartTime;
-      return Math.min(elapsed, this.audioBuffer.duration);
+    if (this.singleAudio && !this.singleAudio.paused && !isNaN(this.singleAudio.currentTime) && this.singleAudio.currentTime > 0) {
+      return this.singleAudio.currentTime;
     }
 
     return this.pausedAt;
@@ -405,6 +489,16 @@ export class KaraokeAudioEngine {
     if (this.bufferSourceNode && this.audioCtx) {
       this.bufferSourceNode.playbackRate.setValueAtTime(settings.playbackRate, this.audioCtx.currentTime);
     }
+    if (this.notchFilter && this.audioCtx) {
+      this.notchFilter.frequency.setValueAtTime(settings.vocalNotchFreq || 1100, this.audioCtx.currentTime);
+      this.notchFilter.Q.setValueAtTime(settings.vocalNotchQ || 1.8, this.audioCtx.currentTime);
+    }
+    if (this.bassGain && this.audioCtx) {
+      this.bassGain.gain.setValueAtTime(settings.bassPreservation !== undefined ? settings.bassPreservation : 0.85, this.audioCtx.currentTime);
+    }
+    if (this.vocalRemovedGain && this.audioCtx && !this.isOriginalSolo) {
+      this.vocalRemovedGain.gain.setValueAtTime(Math.min(1.0, settings.vocalRemovalDepth || 0.95), this.audioCtx.currentTime);
+    }
   }
 
   public setStemVolume(stemKey: 'bass' | 'drums' | 'melody' | 'vocals', volume: number) {
@@ -435,16 +529,56 @@ export class KaraokeAudioEngine {
     settings: AudioProcessingSettings,
     onProgress?: (percent: number) => void
   ): Promise<Blob> {
-    if (onProgress) onProgress(30);
+    if (onProgress) onProgress(20);
 
     const dur = this.getDuration();
     const sampleRate = 44100;
-    const offlineCtx = new OfflineAudioContext(2, sampleRate * dur, sampleRate);
+    const totalFrames = Math.ceil(sampleRate * Math.max(1, dur));
+    const offlineCtx = new OfflineAudioContext(2, totalFrames, sampleRate);
 
     if (this.audioBuffer) {
       const src = offlineCtx.createBufferSource();
       src.buffer = this.audioBuffer;
-      src.connect(offlineCtx.destination);
+
+      const vocalRemovedGain = offlineCtx.createGain();
+      vocalRemovedGain.gain.value = 1.0;
+
+      const splitter = offlineCtx.createChannelSplitter(2);
+      src.connect(splitter);
+
+      const rightInverter = offlineCtx.createGain();
+      rightInverter.gain.value = -1.0;
+      splitter.connect(rightInverter, 1);
+
+      const subtractorMerger = offlineCtx.createChannelMerger(2);
+      splitter.connect(subtractorMerger, 0, 0);
+      rightInverter.connect(subtractorMerger, 0, 0);
+      splitter.connect(subtractorMerger, 0, 1);
+      rightInverter.connect(subtractorMerger, 0, 1);
+
+      const notchFilter = offlineCtx.createBiquadFilter();
+      notchFilter.type = 'notch';
+      notchFilter.frequency.value = settings.vocalNotchFreq || 1100;
+      notchFilter.Q.value = settings.vocalNotchQ || 1.8;
+      subtractorMerger.connect(notchFilter);
+
+      const trebleFilter = offlineCtx.createBiquadFilter();
+      trebleFilter.type = 'highshelf';
+      trebleFilter.frequency.value = 6000;
+      trebleFilter.gain.value = (settings.trebleBoost || 0.35) * 6;
+      notchFilter.connect(trebleFilter);
+      trebleFilter.connect(vocalRemovedGain);
+
+      const bassFilter = offlineCtx.createBiquadFilter();
+      bassFilter.type = 'lowpass';
+      bassFilter.frequency.value = 180;
+      const bassGain = offlineCtx.createGain();
+      bassGain.gain.value = settings.bassPreservation !== undefined ? settings.bassPreservation : 0.85;
+      src.connect(bassFilter);
+      bassFilter.connect(bassGain);
+      bassGain.connect(vocalRemovedGain);
+
+      vocalRemovedGain.connect(offlineCtx.destination);
       src.start(0);
     } else {
       const mainGain = offlineCtx.createGain();

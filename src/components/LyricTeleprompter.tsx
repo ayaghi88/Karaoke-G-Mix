@@ -104,9 +104,9 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   // Frame-perfect requestAnimationFrame loop polling audio time continuously
   useEffect(() => {
     const syncLoop = () => {
-      const elTime = audioRef?.current?.currentTime || 0;
       const engineTime = audioEngine.getCurrentTime();
-      const activeTime = elTime > 0 ? elTime : (audioEngine.getIsPlaying() ? engineTime : currentTime);
+      const elTime = audioRef?.current && !audioRef.current.paused ? audioRef.current.currentTime : 0;
+      const activeTime = audioEngine.getIsPlaying() ? engineTime : (elTime > 0 ? elTime : currentTime);
 
       setExactMs(Math.round(activeTime * 1000));
       animFrameRef.current = requestAnimationFrame(syncLoop);
