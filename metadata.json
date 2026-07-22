@@ -1,6 +1,6 @@
 {
-  "name": "Free Karaoke Track Studio",
-  "description": "Master audio producer studio to isolate instrumentals, remove vocals, shift key, sync lyrics, and record custom karaoke tracks 100% free.",
+  "name": "Karaoke G-Mix",
+  "description": "Extract clean instrumentals from YouTube URLs and audio files, isolate vocals, and export copyright-safe Karaoke G-Mix backing tracks 100% free.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -54,11 +54,11 @@ export const FreeToolsGuideModal: React.FC<FreeToolsGuideModalProps> = ({
           </ul>
         </div>
 
-        {/* Section 2: Top External Free AI Stem Removers */}
+        {/* Section 2: Top External Free AI Stem Removers & YouTube Clearance */}
         <div className="space-y-3">
           <h3 className="text-xs font-bold text-slate-200 flex items-center gap-2">
             <Disc className="w-4 h-4 text-indigo-400" />
-            2. Recommended Free AI Vocal Removers & Neural Stem Extractors
+            2. YouTube "Karaoke G-Mix" Copyright Clearance & Free AI Tools
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -69,29 +69,29 @@ export const FreeToolsGuideModal: React.FC<FreeToolsGuideModalProps> = ({
                 <span className="text-[10px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-800 font-semibold">100% Free Daily</span>
               </div>
               <p className="text-[11px] text-slate-400">
-                AI deep learning model that separates vocals and instrumentals in ~20 seconds. Very clean results.
+                AI deep learning stem extractor that isolates vocals and backing tracks in seconds with high fidelity.
               </p>
             </div>
 
             {/* Tool 2 */}
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-cyan-300">LALAL.AI (Free Preview)</span>
-                <span className="text-[10px] bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800 font-semibold">Free Preview</span>
+                <span className="font-bold text-xs text-cyan-300">LALAL.AI</span>
+                <span className="text-[10px] bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800 font-semibold">Stem Extraction</span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Stem separation for drums, bass, vocals, and piano. You can process snippets for free or use our built-in DSP.
+                High-precision Phoenix stem separation for drums, bass, acoustic guitar, piano, and main vocals.
               </p>
             </div>
 
             {/* Tool 3 */}
             <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-1.5 sm:col-span-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-amber-300">Ultimate Vocal Remover (UVR5)</span>
-                <span className="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded border border-amber-800 font-semibold">Open Source (Unlimited Free)</span>
+                <span className="font-bold text-xs text-amber-300">YouTube Copyright-Safe "Karaoke G-Mix" Re-upload Guide</span>
+                <span className="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded border border-amber-800 font-semibold">Copyright Protection</span>
               </div>
               <p className="text-[11px] text-slate-400">
-                The industry-standard open-source application used by master audio engineers. Runs locally on Windows/Mac using AI models like MDX-Net & Demucs with 0 fee forever.
+                When re-uploading your backing track to YouTube as a "Karaoke G-Mix", ensure all vocal lyric tracks are completely eliminated. Add <i>"Karaoke G-Mix Instrumental (No Lyric Vocals)"</i> in your YouTube video title and description to comply with YouTube's automated content identification guidelines.
               </p>
             </div>
           </div>

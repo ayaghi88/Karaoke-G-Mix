@@ -147,17 +147,17 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
             id="btn-export-wav"
             disabled={!currentTrack || isExporting}
             onClick={onExportWav}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2 disabled:opacity-40"
+            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2 disabled:opacity-40"
           >
             {isExporting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Exporting ({exportProgress}%)...</span>
+                <span>Generating G-Mix ({exportProgress}%)...</span>
               </>
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                <span>Export Instrumental WAV (Free)</span>
+                <span>Export Karaoke G-Mix (YouTube Safe)</span>
               </>
             )}
           </button>

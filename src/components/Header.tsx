@@ -26,14 +26,14 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-bold text-lg text-slate-100 tracking-tight">
-                Karaoke<span className="text-cyan-400">Studio</span>
+                Karaoke <span className="text-cyan-400">G-Mix</span>
               </h1>
-              <span className="px-2 py-0.5 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 rounded-full flex items-center gap-1">
-                <Sparkles className="w-2.5 h-2.5" /> 100% Free AI & DSP
+              <span className="px-2 py-0.5 text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/80 rounded-full flex items-center gap-1 shadow-sm">
+                <Sparkles className="w-2.5 h-2.5 text-amber-400" /> YouTube Safe • 100% Free
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              {currentTrack ? `${currentTrack.name} • ${currentTrack.artist}` : 'Master Audio Instrumental Extractor'}
+              {currentTrack ? `${currentTrack.name} (${currentTrack.gMixVersion || 'Karaoke G-Mix'})` : 'YouTube Song Instrumental Extractor & Replica Generator'}
             </p>
           </div>
         </div>

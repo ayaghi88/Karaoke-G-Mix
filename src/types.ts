@@ -6,6 +6,10 @@ export interface TrackMetadata {
   sampleRate: number;
   numberOfChannels: number;
   fileSize?: number;
+  youtubeUrl?: string;
+  isYoutubeImport?: boolean;
+  copyrightCleared?: boolean;
+  gMixVersion?: string;
 }
 
 export interface AudioProcessingSettings {
