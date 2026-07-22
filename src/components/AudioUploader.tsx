@@ -4,7 +4,7 @@ import { TrackMetadata } from '../types';
 
 interface AudioUploaderProps {
   onLoadAudioFile: (file: File) => void;
-  onLoadYoutubeUrl: (url: string, title?: string) => void;
+  onLoadYoutubeUrl: (query: string, title?: string, artist?: string, song?: string) => void;
   isLoading: boolean;
   currentTrack: TrackMetadata | null;
   audioRef?: React.RefObject<HTMLAudioElement>;
@@ -70,13 +70,12 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!artistInput.trim() || !songInput.trim()) return;
+    const cleanArtist = artistInput.trim();
+    const cleanSong = songInput.trim();
+    if (!cleanArtist || !cleanSong) return;
     unlockAudioContext();
-    const combinedTitle = `${songInput.trim()} - ${artistInput.trim()}`;
-    const sanitizedSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(
-      artistInput.trim() + ' ' + songInput.trim() + ' Official Audio'
-    )}`;
-    onLoadYoutubeUrl(sanitizedSearch, combinedTitle);
+    const combinedTitle = `${cleanSong} - ${cleanArtist}`;
+    onLoadYoutubeUrl(combinedTitle, combinedTitle, cleanArtist, cleanSong);
   };
 
   return (

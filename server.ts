@@ -97,37 +97,71 @@ async function startServer() {
   // =========================================================================
   app.post('/api/process-track', async (req, res) => {
     try {
-      const { query, youtubeUrl, songTitle, artistName, artist, song } = req.body;
-      const resolvedArtist = artist || artistName || '';
-      const resolvedSong = song || songTitle || '';
-      const rawInput = query || youtubeUrl || (resolvedArtist && resolvedSong ? `${resolvedSong} ${resolvedArtist}` : 'Hurt Christina Aguilera');
+      const { query, youtubeUrl, songTitle, customTitle, artistName, artist, song } = req.body;
+      let resolvedArtist = (artist || artistName || '').trim();
+      let resolvedSong = (song || songTitle || customTitle || '').trim();
+      let rawQuery = (query || youtubeUrl || '').trim();
 
-      const cleanedQuery = rawInput
-        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/gi, '')
-        .replace(/\(Official (Music )?Video\)/gi, '')
-        .replace(/\[Official (Music )?Video\]/gi, '')
-        .replace(/4K|HD|HQ/gi, '')
-        .replace(/Official Audio|Audio|Video/gi, '')
-        .trim() || 'Hurt Christina Aguilera';
+      // Extract search_query from YouTube URLs if present
+      if (rawQuery.includes('search_query=')) {
+        try {
+          const match = rawQuery.match(/search_query=([^&]+)/);
+          if (match && match[1]) {
+            rawQuery = decodeURIComponent(match[1]);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
 
-      console.log('Processing real track audio search for:', cleanedQuery);
+      if (rawQuery.startsWith('http://') || rawQuery.startsWith('https://')) {
+        rawQuery = '';
+      }
 
-      // 1. Search iTunes API for the actual song audio preview
+      if ((!resolvedArtist || !resolvedSong) && rawQuery) {
+        const cleanedRaw = rawQuery
+          .replace(/\(Official (Music )?Video\)/gi, '')
+          .replace(/\[Official (Music )?Video\]/gi, '')
+          .replace(/4K|HD|HQ/gi, '')
+          .replace(/Official Audio|Audio|Video/gi, '')
+          .trim();
+
+        if (cleanedRaw.includes(' - ')) {
+          const parts = cleanedRaw.split(' - ');
+          if (!resolvedSong) resolvedSong = parts[0].trim();
+          if (!resolvedArtist) resolvedArtist = parts[1].trim();
+        } else if (cleanedRaw.includes('-')) {
+          const parts = cleanedRaw.split('-');
+          if (!resolvedSong) resolvedSong = parts[0].trim();
+          if (!resolvedArtist) resolvedArtist = parts[1].trim();
+        } else {
+          if (!resolvedSong) resolvedSong = cleanedRaw;
+        }
+      }
+
+      if (!resolvedSong) resolvedSong = 'Hurt';
+      if (!resolvedArtist) resolvedArtist = 'Christina Aguilera';
+
+      const searchTerms = `${resolvedSong} ${resolvedArtist}`.trim();
+
+      console.log('Processing real track audio search for:', { searchTerms, resolvedSong, resolvedArtist });
+
+      // 1. Search iTunes API for actual song metadata and preview
       let audioUrl = null;
-      let realTitle = cleanedQuery;
-      let realArtist = resolvedArtist || 'Studio Master';
-      let realSong = resolvedSong || cleanedQuery;
+      let realSong = resolvedSong;
+      let realArtist = resolvedArtist;
+      let realTitle = `${realSong} - ${realArtist}`;
       let duration = 210;
 
       try {
-        const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanedQuery)}&entity=song&limit=1`);
+        const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(searchTerms)}&entity=song&limit=1`);
         if (itunesRes.ok) {
           const itunesData = await itunesRes.json();
           if (itunesData.results && itunesData.results.length > 0) {
             const track = itunesData.results[0];
             audioUrl = `/api/audio/proxy?url=${encodeURIComponent(track.previewUrl)}`;
-            realSong = track.trackName;
-            realArtist = track.artistName;
+            realSong = track.trackName || resolvedSong;
+            realArtist = track.artistName || resolvedArtist;
             realTitle = `${realSong} - ${realArtist}`;
             duration = Math.round((track.trackTimeMillis || 210000) / 1000);
           }

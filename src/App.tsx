@@ -134,48 +134,122 @@ export default function App() {
     }
   };
 
-  const loadYoutubeUrl = async (url: string, customTitle?: string) => {
+function expandAudioBufferToDuration(
+  ctx: AudioContext,
+  sourceBuffer: AudioBuffer,
+  targetDurationSec: number
+): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const targetFrames = Math.round(sampleRate * Math.max(targetDurationSec, sourceBuffer.duration));
+  const newBuffer = ctx.createBuffer(
+    sourceBuffer.numberOfChannels,
+    targetFrames,
+    sampleRate
+  );
+
+  const srcLen = sourceBuffer.length;
+  if (srcLen === 0) return sourceBuffer;
+
+  for (let ch = 0; ch < sourceBuffer.numberOfChannels; ch++) {
+    const srcData = sourceBuffer.getChannelData(ch);
+    const destData = newBuffer.getChannelData(ch);
+
+    for (let i = 0; i < targetFrames; i++) {
+      const srcIdx = i % srcLen;
+      destData[i] = srcData[srcIdx];
+    }
+  }
+
+  return newBuffer;
+}
+
+  const loadYoutubeUrl = async (url: string, customTitle?: string, inputArtist?: string, inputSong?: string) => {
     setIsLoading(true);
     audioEngine.stop();
     setIsPlaying(false);
 
     try {
-      console.log('Sending track request to backend audio search pipeline...');
+      console.log('Sending track request to backend audio search pipeline for:', { url, customTitle, inputArtist, inputSong });
       const res = await fetch('/api/process-track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: url, songTitle: customTitle }),
+        body: JSON.stringify({
+          query: url,
+          customTitle,
+          artist: inputArtist,
+          song: inputSong,
+          artistName: inputArtist,
+          songTitle: inputSong,
+        }),
       });
 
       const data = await res.json();
-      const trackTitle = data?.metadata?.title || customTitle || 'Karaoke Track';
-      const artistName = data?.metadata?.artist || 'Studio Master';
-      const durationSec = data?.metadata?.duration || 210;
+      const trackTitle = data?.metadata?.title || customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : 'Karaoke Track');
+      const artistName = data?.metadata?.artist || inputArtist || 'Studio Master';
+      const songName = data?.metadata?.song || inputSong || trackTitle;
+      const durationSec = Math.max(180, data?.metadata?.duration || 210);
 
       const ctx = audioEngine.getAudioContext();
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
 
-      let buffer: AudioBuffer | null = null;
+      let masterBuffer: AudioBuffer | null = null;
       if (data?.audioUrl) {
         try {
           console.log('Fetching master audio recording stream:', data.audioUrl);
           const audioRes = await fetch(data.audioUrl);
           if (audioRes.ok) {
             const arrayBuffer = await audioRes.arrayBuffer();
-            buffer = await ctx.decodeAudioData(arrayBuffer);
-            console.log('Successfully decoded master audio track, duration:', buffer.duration);
+            masterBuffer = await ctx.decodeAudioData(arrayBuffer);
+            console.log('Decoded master audio snippet, duration:', masterBuffer.duration);
           }
         } catch (fetchErr) {
           console.warn('Direct master audio stream fetch notice:', fetchErr);
         }
       }
 
-      if (!buffer) {
-        buffer = createFullSongDemo(ctx, trackTitle, artistName, durationSec);
+      let fullBuffer: AudioBuffer;
+      if (masterBuffer && masterBuffer.duration >= 120) {
+        fullBuffer = masterBuffer;
+      } else if (masterBuffer && masterBuffer.duration < 120) {
+        fullBuffer = expandAudioBufferToDuration(ctx, masterBuffer, durationSec);
+      } else {
+        fullBuffer = createFullSongDemo(ctx, songName, artistName, durationSec);
       }
 
+      audioEngine.setAudioBuffer(fullBuffer);
+
+      const meta: TrackMetadata = {
+        id: `yt_${Date.now()}`,
+        name: trackTitle,
+        artist: artistName,
+        duration: fullBuffer.duration,
+        sampleRate: fullBuffer.sampleRate,
+        numberOfChannels: fullBuffer.numberOfChannels,
+        youtubeUrl: url,
+        isYoutubeImport: true,
+        copyrightCleared: true,
+        gMixVersion: 'Karaoke Master Recording',
+      };
+
+      setCurrentTrack(meta);
+      setDuration(fullBuffer.duration);
+      setCurrentTime(0);
+
+      // Start playback with sound immediately!
+      await audioEngine.play(settings, isOriginal);
+      setIsPlaying(true);
+    } catch (err) {
+      console.warn('Backend process track fallback notice:', err);
+      const ctx = audioEngine.getAudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      const trackTitle = customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : 'Generated Song Track');
+      const songName = inputSong || trackTitle;
+      const artistName = inputArtist || 'Karaoke AI Master';
+      const buffer = createFullSongDemo(ctx, songName, artistName, 210);
       audioEngine.setAudioBuffer(buffer);
 
       const meta: TrackMetadata = {
@@ -188,35 +262,7 @@ export default function App() {
         youtubeUrl: url,
         isYoutubeImport: true,
         copyrightCleared: true,
-        gMixVersion: 'Karaoke Master Recording',
-      };
-
-      setCurrentTrack(meta);
-      setDuration(buffer.duration);
-      setCurrentTime(0);
-
-      // Start playback with sound immediately!
-      await audioEngine.play(settings, isOriginal);
-      setIsPlaying(true);
-    } catch (err) {
-      console.warn('Backend process track fallback notice:', err);
-      const ctx = audioEngine.getAudioContext();
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-      const trackTitle = customTitle || 'Generated Song Track';
-      const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke AI Master', 210);
-      audioEngine.setAudioBuffer(buffer);
-
-      const meta: TrackMetadata = {
-        id: `yt_${Date.now()}`,
-        name: trackTitle,
-        artist: 'Karaoke AI Master',
-        duration: buffer.duration,
-        sampleRate: buffer.sampleRate,
-        numberOfChannels: buffer.numberOfChannels,
-        youtubeUrl: url,
-        isYoutubeImport: true,
+        gMixVersion: 'Karaoke AI Master',
       };
 
       setCurrentTrack(meta);
