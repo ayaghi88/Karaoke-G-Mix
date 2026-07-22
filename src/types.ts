@@ -10,6 +10,9 @@ export interface TrackMetadata {
   isYoutubeImport?: boolean;
   copyrightCleared?: boolean;
   gMixVersion?: string;
+  instrumentalStreamUrl?: string;
+  vocalsStreamUrl?: string;
+  isCloudStream?: boolean;
 }
 
 export interface AudioProcessingSettings {
@@ -25,10 +28,17 @@ export interface AudioProcessingSettings {
   reverbMix: number; // 0 to 1
 }
 
+export interface LyricWord {
+  word: string;
+  timeMs: number;
+}
+
 export interface LyricLine {
   id: string;
   time: number; // in seconds
+  timeMs?: number;
   text: string;
+  words?: LyricWord[];
 }
 
 export interface RecordingState {
