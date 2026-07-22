@@ -126,8 +126,20 @@ export class KaraokeAudioEngine {
 
     const backingUrl = stems.fullBackingTrack || stems.melody;
 
-    // Check if we need to fetch & merge individual stem files into a single AudioBuffer
-    if (!backingUrl && (stems.bass || stems.drums || stems.melody)) {
+    if (backingUrl) {
+      try {
+        const ctx = this.getAudioContext();
+        const res = await fetch(backingUrl);
+        if (res.ok) {
+          const arrayBuf = await res.arrayBuffer();
+          const decoded = await ctx.decodeAudioData(arrayBuf);
+          this.audioBuffer = decoded;
+          this.trackDuration = decoded.duration;
+        }
+      } catch (err) {
+        console.warn('Backing track decode notice, using singleAudio fallback:', err);
+      }
+    } else if (stems.bass || stems.drums || stems.melody) {
       try {
         const ctx = this.getAudioContext();
         const urls = [stems.bass, stems.drums, stems.melody].filter((u): u is string => Boolean(u));
@@ -224,12 +236,17 @@ export class KaraokeAudioEngine {
   /**
    * Master playback function triggered directly on user button click gesture.
    */
-  public play(settings: AudioProcessingSettings, isOriginal: boolean = false) {
+  public async play(settings: AudioProcessingSettings, isOriginal: boolean = false) {
     const ctx = this.getAudioContext();
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.warn('AudioContext resume notice:', e);
+      }
+    }
     this.initMasterNodes();
     this.isOriginalSolo = isOriginal;
-
-    this.setupSingleAudioElement();
 
     if (this.vocalsAudio && this.vocalsGain) {
       this.vocalsGain.gain.value = isOriginal ? 1.0 : 0.0;
@@ -239,25 +256,23 @@ export class KaraokeAudioEngine {
       this.vocalsAudio.play().catch(() => {});
     }
 
-    if (this.singleAudio && this.singleAudio.src) {
-      this.singleAudio.currentTime = this.pausedAt;
-      this.singleAudio.playbackRate = settings.playbackRate;
-
-      this.singleAudio
-        .play()
-        .then(() => {
-          this.isPlaying = true;
-        })
-        .catch((err) => {
-          console.warn('HTML5 single audio playback notice:', err);
-          this.playFallbackBuffer(settings);
-        });
-
+    if (this.audioBuffer) {
+      this.playFallbackBuffer(settings);
       this.isPlaying = true;
       return;
     }
 
-    this.playFallbackBuffer(settings);
+    if (this.singleAudio && this.singleAudio.src) {
+      this.singleAudio.currentTime = this.pausedAt;
+      this.singleAudio.playbackRate = settings.playbackRate;
+
+      try {
+        await this.singleAudio.play();
+        this.isPlaying = true;
+      } catch (err) {
+        console.warn('HTML5 single audio playback notice:', err);
+      }
+    }
   }
 
   private playFallbackBuffer(settings: AudioProcessingSettings) {

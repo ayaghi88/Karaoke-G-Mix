@@ -248,9 +248,9 @@ export default function App() {
     }, 100);
   };
 
-  const handlePlay = () => {
+  const handlePlay = async () => {
     if (!currentTrack) return;
-    audioEngine.play(settings, isOriginal);
+    await audioEngine.play(settings, isOriginal);
     setIsPlaying(true);
   };
 
