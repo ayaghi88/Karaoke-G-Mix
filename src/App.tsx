@@ -184,9 +184,9 @@ function expandAudioBufferToDuration(
       });
 
       const data = await res.json();
-      const trackTitle = data?.metadata?.title || customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : 'Karaoke Track');
-      const artistName = data?.metadata?.artist || inputArtist || 'Studio Master';
-      const songName = data?.metadata?.song || inputSong || trackTitle;
+      const trackTitle = data?.metadata?.title || customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : (inputSong || inputArtist || 'Karaoke Track'));
+      const artistName = data?.metadata?.artist || inputArtist || (trackTitle.includes(' - ') ? trackTitle.split(' - ')[1] : '');
+      const songName = data?.metadata?.song || inputSong || (trackTitle.includes(' - ') ? trackTitle.split(' - ')[0] : trackTitle);
       const durationSec = Math.max(180, data?.metadata?.duration || 210);
 
       const ctx = audioEngine.getAudioContext();
@@ -209,32 +209,31 @@ function expandAudioBufferToDuration(
         }
       }
 
-      let fullBuffer: AudioBuffer;
-      if (masterBuffer && masterBuffer.duration >= 120) {
-        fullBuffer = masterBuffer;
-      } else if (masterBuffer && masterBuffer.duration < 120) {
-        fullBuffer = expandAudioBufferToDuration(ctx, masterBuffer, durationSec);
-      } else {
-        fullBuffer = createFullSongDemo(ctx, songName, artistName, durationSec);
-      }
+      const origBuffer = masterBuffer 
+        ? (masterBuffer.duration < 120 ? expandAudioBufferToDuration(ctx, masterBuffer, durationSec) : masterBuffer) 
+        : createFullSongDemo(ctx, songName, artistName, durationSec, true);
 
-      audioEngine.setAudioBuffer(fullBuffer);
+      const instBuffer = masterBuffer 
+        ? (masterBuffer.duration < 120 ? expandAudioBufferToDuration(ctx, masterBuffer, durationSec) : masterBuffer) 
+        : createFullSongDemo(ctx, songName, artistName, durationSec, false);
+
+      audioEngine.setAudioBuffers(origBuffer, instBuffer);
 
       const meta: TrackMetadata = {
         id: `yt_${Date.now()}`,
         name: trackTitle,
         artist: artistName,
-        duration: fullBuffer.duration,
-        sampleRate: fullBuffer.sampleRate,
-        numberOfChannels: fullBuffer.numberOfChannels,
+        duration: origBuffer.duration,
+        sampleRate: origBuffer.sampleRate,
+        numberOfChannels: origBuffer.numberOfChannels,
         youtubeUrl: url,
         isYoutubeImport: true,
         copyrightCleared: true,
-        gMixVersion: 'Karaoke Master Recording',
+        gMixVersion: 'Karaoke Version',
       };
 
       setCurrentTrack(meta);
-      setDuration(fullBuffer.duration);
+      setDuration(origBuffer.duration);
       setCurrentTime(0);
 
       // Start playback with sound immediately!
@@ -246,27 +245,29 @@ function expandAudioBufferToDuration(
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
-      const trackTitle = customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : 'Generated Song Track');
-      const songName = inputSong || trackTitle;
-      const artistName = inputArtist || 'Karaoke AI Master';
-      const buffer = createFullSongDemo(ctx, songName, artistName, 210);
-      audioEngine.setAudioBuffer(buffer);
+      const trackTitle = customTitle || (inputSong && inputArtist ? `${inputSong} - ${inputArtist}` : (inputSong || inputArtist || 'Karaoke Track'));
+      const songName = inputSong || (trackTitle.includes(' - ') ? trackTitle.split(' - ')[0] : trackTitle);
+      const artistName = inputArtist || (trackTitle.includes(' - ') ? trackTitle.split(' - ')[1] : '');
+      
+      const origBuffer = createFullSongDemo(ctx, songName, artistName, 210, true);
+      const instBuffer = createFullSongDemo(ctx, songName, artistName, 210, false);
+      audioEngine.setAudioBuffers(origBuffer, instBuffer);
 
       const meta: TrackMetadata = {
         id: `yt_${Date.now()}`,
         name: trackTitle,
         artist: artistName,
-        duration: buffer.duration,
-        sampleRate: buffer.sampleRate,
-        numberOfChannels: buffer.numberOfChannels,
+        duration: instBuffer.duration,
+        sampleRate: instBuffer.sampleRate,
+        numberOfChannels: instBuffer.numberOfChannels,
         youtubeUrl: url,
         isYoutubeImport: true,
         copyrightCleared: true,
-        gMixVersion: 'Karaoke AI Master',
+        gMixVersion: 'Karaoke Version',
       };
 
       setCurrentTrack(meta);
-      setDuration(buffer.duration);
+      setDuration(instBuffer.duration);
       setCurrentTime(0);
 
       await audioEngine.play(settings, isOriginal);

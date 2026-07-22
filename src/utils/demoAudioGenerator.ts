@@ -47,7 +47,8 @@ export function createFullSongDemo(
   ctx: AudioContext,
   songTitle: string = 'Hurt',
   artistName: string = 'Christina Aguilera',
-  customDurationSeconds: number = 220
+  customDurationSeconds: number = 220,
+  includeVocals: boolean = false
 ): AudioBuffer {
   const duration = Math.max(120, customDurationSeconds); // full song length (e.g. 220s / 3:40m)
   const sampleRate = ctx.sampleRate;
@@ -138,6 +139,10 @@ export function createFullSongDemo(
       hasDrums = false;
       hasFullStrings = true;
       vocalActive = t < duration - 8;
+    }
+
+    if (!includeVocals) {
+      vocalActive = false;
     }
 
     // 1. Piano Arpeggio (Wide Stereo Panned Chords)

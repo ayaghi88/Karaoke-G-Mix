@@ -30,6 +30,7 @@ export class KaraokeAudioEngine {
 
   // Fallback AudioBuffer for Web Audio synthesis or local file decoding
   private audioBuffer: AudioBuffer | null = null;
+  private instrumentalBuffer: AudioBuffer | null = null;
   private bufferSourceNode: AudioBufferSourceNode | null = null;
   private bufferStartTime: number = 0;
 
@@ -219,13 +220,18 @@ export class KaraokeAudioEngine {
   }
 
   public setAudioBuffer(buffer: AudioBuffer) {
+    this.setAudioBuffers(buffer, buffer);
+  }
+
+  public setAudioBuffers(originalBuffer: AudioBuffer, instrumentalBuffer?: AudioBuffer) {
     this.stop();
-    this.audioBuffer = buffer;
-    this.trackDuration = buffer.duration;
+    this.audioBuffer = originalBuffer;
+    this.instrumentalBuffer = instrumentalBuffer || originalBuffer;
+    this.trackDuration = originalBuffer.duration;
 
     this.setupSingleAudioElement();
     if (this.singleAudio) {
-      const wavBlob = audioBufferToWav(buffer);
+      const wavBlob = audioBufferToWav(originalBuffer);
       this.singleAudio.src = URL.createObjectURL(wavBlob);
     }
 
@@ -332,17 +338,17 @@ export class KaraokeAudioEngine {
     this.notchFilter.connect(this.trebleFilter);
     this.trebleFilter.connect(this.vocalRemovedGain);
 
-    // Sub-Bass Preservation Path (< 180Hz)
+    // Sub-Bass Preservation Path (< 120Hz) - Connected to subtractorMerger to ensure NO un-canceled vocal leaks
     const bassFilter = ctx.createBiquadFilter();
     bassFilter.type = 'lowpass';
-    bassFilter.frequency.setValueAtTime(180, ctx.currentTime);
+    bassFilter.frequency.setValueAtTime(120, ctx.currentTime);
     bassFilter.Q.setValueAtTime(0.707, ctx.currentTime);
 
     this.bassGain = ctx.createGain();
     const bassLevel = settings.bassPreservation !== undefined ? settings.bassPreservation : 0.85;
     this.bassGain.gain.setValueAtTime(bassLevel, ctx.currentTime);
 
-    sourceNode.connect(bassFilter);
+    subtractorMerger.connect(bassFilter);
     bassFilter.connect(this.bassGain);
     this.bassGain.connect(this.vocalRemovedGain);
 
@@ -392,26 +398,27 @@ export class KaraokeAudioEngine {
   }
 
   private playFallbackBuffer(settings: AudioProcessingSettings, isOriginal: boolean = false) {
-    if (!this.audioBuffer) return;
+    const activeBuf = (!isOriginal && this.instrumentalBuffer) ? this.instrumentalBuffer : this.audioBuffer;
+    if (!activeBuf) return;
     const ctx = this.getAudioContext();
 
     this.stopBufferSource();
 
     this.bufferSourceNode = ctx.createBufferSource();
-    this.bufferSourceNode.buffer = this.audioBuffer;
+    this.bufferSourceNode.buffer = activeBuf;
     this.bufferSourceNode.playbackRate.value = settings.playbackRate;
 
     // Connect source through live DSP vocal removal graph
     this.connectSourceToDSPGraph(this.bufferSourceNode, settings, isOriginal);
 
-    const offset = this.pausedAt % this.audioBuffer.duration;
+    const offset = this.pausedAt % activeBuf.duration;
     this.bufferStartTime = ctx.currentTime - offset;
     this.bufferSourceNode.start(0, offset);
 
     this.isPlaying = true;
 
     this.bufferSourceNode.onended = () => {
-      if (this.isPlaying && ctx.currentTime - this.bufferStartTime >= (this.audioBuffer?.duration || 0) / settings.playbackRate) {
+      if (this.isPlaying && ctx.currentTime - this.bufferStartTime >= (activeBuf.duration || 0) / settings.playbackRate) {
         this.handleTrackEnded();
       }
     };
@@ -567,9 +574,10 @@ export class KaraokeAudioEngine {
     const totalFrames = Math.ceil(sampleRate * Math.max(1, dur));
     const offlineCtx = new OfflineAudioContext(2, totalFrames, sampleRate);
 
-    if (this.audioBuffer) {
+    const exportBuf = this.instrumentalBuffer || this.audioBuffer;
+    if (exportBuf) {
       const src = offlineCtx.createBufferSource();
-      src.buffer = this.audioBuffer;
+      src.buffer = exportBuf;
 
       const vocalRemovedGain = offlineCtx.createGain();
       vocalRemovedGain.gain.value = 1.0;
@@ -602,10 +610,10 @@ export class KaraokeAudioEngine {
 
       const bassFilter = offlineCtx.createBiquadFilter();
       bassFilter.type = 'lowpass';
-      bassFilter.frequency.value = 180;
+      bassFilter.frequency.value = 120;
       const bassGain = offlineCtx.createGain();
       bassGain.gain.value = settings.bassPreservation !== undefined ? settings.bassPreservation : 0.85;
-      src.connect(bassFilter);
+      subtractorMerger.connect(bassFilter);
       bassFilter.connect(bassGain);
       bassGain.connect(vocalRemovedGain);
 

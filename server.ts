@@ -139,8 +139,8 @@ async function startServer() {
         }
       }
 
-      if (!resolvedSong) resolvedSong = 'Hurt';
-      if (!resolvedArtist) resolvedArtist = 'Christina Aguilera';
+      if (!resolvedSong) resolvedSong = rawQuery || 'Karaoke Track';
+      if (!resolvedArtist) resolvedArtist = '';
 
       const searchTerms = `${resolvedSong} ${resolvedArtist}`.trim();
 
@@ -150,7 +150,7 @@ async function startServer() {
       let audioUrl = null;
       let realSong = resolvedSong;
       let realArtist = resolvedArtist;
-      let realTitle = `${realSong} - ${realArtist}`;
+      let realTitle = realArtist ? `${realSong} - ${realArtist}` : realSong;
       let duration = 210;
 
       try {
@@ -162,7 +162,7 @@ async function startServer() {
             audioUrl = `/api/audio/proxy?url=${encodeURIComponent(track.previewUrl)}`;
             realSong = track.trackName || resolvedSong;
             realArtist = track.artistName || resolvedArtist;
-            realTitle = `${realSong} - ${realArtist}`;
+            realTitle = realArtist ? `${realSong} - ${realArtist}` : realSong;
             duration = Math.round((track.trackTimeMillis || 210000) / 1000);
           }
         }
