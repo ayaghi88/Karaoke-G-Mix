@@ -43,7 +43,183 @@ export const DEMO_TRACKS: DemoTrackOption[] = [
   },
 ];
 
-function createPopDemo(ctx: AudioContext): AudioBuffer {
+export function createFullSongDemo(
+  ctx: AudioContext,
+  songTitle: string = 'Hurt',
+  artistName: string = 'Christina Aguilera',
+  customDurationSeconds: number = 220
+): AudioBuffer {
+  const duration = Math.max(120, customDurationSeconds); // full song length (e.g. 220s / 3:40m)
+  const sampleRate = ctx.sampleRate;
+  const numFrames = sampleRate * duration;
+  const buffer = ctx.createBuffer(2, numFrames, sampleRate);
+  const left = buffer.getChannelData(0);
+  const right = buffer.getChannelData(1);
+
+  const isBallad = songTitle.toLowerCase().includes('hurt') || songTitle.toLowerCase().includes('ballad');
+  const bpm = isBallad ? 72 : 115;
+  const beatSec = 60 / bpm;
+
+  // Piano / Chord Progression (Am - F - C - G / Em - C - G - D)
+  const chordFreqs = isBallad
+    ? [
+        [220, 261.63, 329.63, 440],   // Am
+        [174.61, 220, 261.63, 349.23], // F
+        [261.63, 329.63, 392, 523.25], // C
+        [196, 246.94, 293.66, 392],    // G
+      ]
+    : [
+        [130.81, 164.81, 196],
+        [174.61, 220, 261.63],
+        [196, 246.94, 293.66],
+        [220, 261.63, 329.63],
+      ];
+
+  // Lead Vocal Melodic Sequence (Centered)
+  const vocalPitches = [
+    440, 493.88, 523.25, 587.33, 523.25, 493.88, 440, 392,
+    349.23, 392, 440, 523.25, 659.25, 587.33, 523.25, 440
+  ];
+
+  for (let i = 0; i < numFrames; i++) {
+    const t = i / sampleRate;
+    const measureProgress = (t % (beatSec * 4)) / (beatSec * 4);
+    const chordIdx = Math.floor((t / (beatSec * 4)) % chordFreqs.length);
+
+    let l = 0;
+    let r = 0;
+
+    // Structure intensity envelope (Intro -> Verse 1 -> Chorus 1 -> Verse 2 -> Chorus 2 -> Bridge -> Climax -> Outro)
+    let songStructureGain = 0.6;
+    let hasDrums = false;
+    let hasFullStrings = false;
+    let vocalActive = false;
+
+    if (t < 15) {
+      // Intro (Piano & Cello pad)
+      songStructureGain = 0.5;
+      hasDrums = false;
+      hasFullStrings = false;
+      vocalActive = false;
+    } else if (t < 60) {
+      // Verse 1
+      songStructureGain = 0.7;
+      hasDrums = t > 35;
+      hasFullStrings = true;
+      vocalActive = true;
+    } else if (t < 105) {
+      // Chorus 1
+      songStructureGain = 1.0;
+      hasDrums = true;
+      hasFullStrings = true;
+      vocalActive = true;
+    } else if (t < 145) {
+      // Verse 2
+      songStructureGain = 0.8;
+      hasDrums = true;
+      hasFullStrings = true;
+      vocalActive = true;
+    } else if (t < 185) {
+      // Chorus 2 & Soaring Bridge
+      songStructureGain = 1.1;
+      hasDrums = true;
+      hasFullStrings = true;
+      vocalActive = true;
+    } else if (t < duration - 15) {
+      // Final Climax Chorus
+      songStructureGain = 1.2;
+      hasDrums = true;
+      hasFullStrings = true;
+      vocalActive = true;
+    } else {
+      // Outro Fade
+      const fadeOut = Math.max(0, (duration - t) / 15);
+      songStructureGain = 0.6 * fadeOut;
+      hasDrums = false;
+      hasFullStrings = true;
+      vocalActive = t < duration - 8;
+    }
+
+    // 1. Piano Arpeggio (Wide Stereo Panned Chords)
+    const curChord = chordFreqs[chordIdx];
+    const arpPhase = (t % (beatSec / 2)) / (beatSec / 2);
+    const noteStep = Math.floor((t / (beatSec / 2)) % curChord.length);
+    const pFreq = curChord[noteStep];
+    const pEnv = Math.exp(-arpPhase * 3);
+    const pianoSample = Math.sin(2 * Math.PI * pFreq * t) * pEnv * 0.12 * songStructureGain;
+    const pan = (noteStep / curChord.length - 0.5) * 0.6; // Stereo panning
+    l += pianoSample * (1 - pan);
+    r += pianoSample * (1 + pan);
+
+    // 2. Warm Cello / String Pad (Stereo)
+    if (hasFullStrings) {
+      const rootFreq = curChord[0] / 2;
+      const stringPad = (
+        Math.sin(2 * Math.PI * rootFreq * t) +
+        0.5 * Math.sin(2 * Math.PI * (rootFreq * 1.5) * t) +
+        0.3 * Math.sin(2 * Math.PI * (rootFreq * 2) * t)
+      ) * 0.08 * songStructureGain;
+      l += stringPad * 1.1;
+      r += stringPad * 0.9;
+    }
+
+    // 3. Drums & Bass (Centered Kick/Bass, Stereo Snares)
+    if (hasDrums) {
+      const beatPhase = (t % beatSec) / beatSec;
+      // Kick on beat 1 & 3
+      if ((Math.floor(t / beatSec) % 2) === 0 && beatPhase < 0.25) {
+        const kEnv = Math.exp(-beatPhase * 16);
+        const kFreq = 120 * Math.exp(-beatPhase * 25) + 38;
+        const kick = Math.sin(2 * Math.PI * kFreq * t) * kEnv * 0.45 * songStructureGain;
+        l += kick;
+        r += kick;
+      }
+      // Snare on beat 2 & 4
+      if ((Math.floor(t / beatSec) % 2) === 1 && beatPhase < 0.2) {
+        const sEnv = Math.exp(-beatPhase * 18);
+        const noise = (Math.random() * 2 - 1) * sEnv * 0.25 * songStructureGain;
+        l += noise;
+        r += noise * 1.1;
+      }
+      // Bass line
+      const bassFreq = curChord[0] / 2;
+      const bass = Math.sin(2 * Math.PI * bassFreq * t) * 0.22 * songStructureGain;
+      l += bass;
+      r += bass;
+    }
+
+    // 4. CENTERED LEAD VOCAL (Formant-Synthesized Singing Voice, Center Channel)
+    if (vocalActive) {
+      const noteIdx = Math.floor((t / (beatSec * 1.5)) % vocalPitches.length);
+      const vFreq = vocalPitches[noteIdx];
+      const vPhase = (t % (beatSec * 1.5)) / (beatSec * 1.5);
+      
+      if (vPhase < 0.88) {
+        const vEnv = Math.sin(Math.PI * (vPhase / 0.88));
+        const vibrato = 1 + 0.02 * Math.sin(2 * Math.PI * 6.0 * t);
+        const f0 = vFreq * vibrato;
+        // Vocal Formant Harmonics
+        const vocal = (
+          Math.sin(2 * Math.PI * f0 * t) * 0.45 +
+          Math.sin(2 * Math.PI * f0 * 2 * t) * 0.28 +
+          Math.sin(2 * Math.PI * f0 * 3 * t) * 0.18 +
+          Math.sin(2 * Math.PI * f0 * 4 * t) * 0.10
+        ) * vEnv * 0.42 * songStructureGain;
+
+        // Dead Center: Left and Right are 100% identical
+        l += vocal;
+        r += vocal;
+      }
+    }
+
+    left[i] = Math.max(-1, Math.min(1, l));
+    right[i] = Math.max(-1, Math.min(1, r));
+  }
+
+  return buffer;
+}
+
+export function createPopDemo(ctx: AudioContext): AudioBuffer {
   const duration = 18; // 18 seconds snippet
   const sampleRate = ctx.sampleRate;
   const numFrames = sampleRate * duration;

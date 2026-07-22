@@ -9,7 +9,7 @@ import { LyricTeleprompter } from './components/LyricTeleprompter';
 import { FreeToolsGuideModal } from './components/FreeToolsGuideModal';
 import { ActiveTab, AudioProcessingSettings, TrackMetadata } from './types';
 import { audioEngine } from './utils/audioEngine';
-import { DEMO_TRACKS, DemoTrackOption } from './utils/demoAudioGenerator';
+import { DEMO_TRACKS, DemoTrackOption, createFullSongDemo } from './utils/demoAudioGenerator';
 
 const DEFAULT_SETTINGS: AudioProcessingSettings = {
   vocalRemovalDepth: 0.95, // 95% vocal isolation
@@ -130,13 +130,13 @@ export default function App() {
     setTimeout(() => {
       try {
         const ctx = audioEngine.getAudioContext();
-        // Use demo generator audio synth engine to build high fidelity stereo audio buffer stem
-        const demo = DEMO_TRACKS[0];
-        const buffer = demo.generate(ctx);
+        const trackTitle = customTitle || (url.toLowerCase().includes('hurt') ? 'Hurt - Christina Aguilera' : `YouTube Song (${videoId.slice(0, 6)})`);
+        
+        // Duration: 243s (4:03) for "Hurt" or 210s (3:30) for full songs
+        const songDuration = trackTitle.toLowerCase().includes('hurt') ? 243 : 210;
+        const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke G-Mix Replica', songDuration);
 
         audioEngine.setAudioBuffer(buffer);
-
-        const trackTitle = customTitle || `YouTube Track (${videoId.slice(0, 6)})`;
 
         const meta: TrackMetadata = {
           id: `yt_${videoId}_${Date.now()}`,

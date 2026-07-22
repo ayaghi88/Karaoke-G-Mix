@@ -15,6 +15,8 @@ import {
 import { RecordingState, TrackMetadata, AudioProcessingSettings } from '../types';
 import { audioEngine } from '../utils/audioEngine';
 
+import { audioBufferToWav } from '../utils/audioBufferToWav';
+
 interface KaraokeRecordingBoothProps {
   currentTrack: TrackMetadata | null;
   settings: AudioProcessingSettings;
@@ -58,7 +60,17 @@ export const KaraokeRecordingBooth: React.FC<KaraokeRecordingBoothProps> = ({
       setHasMicPermission(true);
 
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(micStream);
+      // Pick iOS and universal browser compatible recorder mimeType
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+        mimeType = 'audio/aac';
+      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      }
+
+      const mediaRecorder = new MediaRecorder(micStream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -67,20 +79,37 @@ export const KaraokeRecordingBooth: React.FC<KaraokeRecordingBoothProps> = ({
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        setRecordingState((prev) => ({
-          ...prev,
-          isRecording: false,
-          recordedBlob: audioBlob,
-          recordedUrl: audioUrl,
-        }));
+      mediaRecorder.onstop = async () => {
+        const rawBlob = new Blob(audioChunksRef.current, { type: mimeType });
         micStream.getTracks().forEach((track) => track.stop());
+
+        // Decode audio data to convert into a 100% universal WAV Blob for iOS/Safari
+        try {
+          const arrayBuffer = await rawBlob.arrayBuffer();
+          const ctx = audioEngine.getAudioContext();
+          const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
+          const wavBlob = audioBufferToWav(decodedBuffer);
+          const audioUrl = URL.createObjectURL(wavBlob);
+          setRecordingState((prev) => ({
+            ...prev,
+            isRecording: false,
+            recordedBlob: wavBlob,
+            recordedUrl: audioUrl,
+          }));
+        } catch (err) {
+          console.warn('WAV conversion fallback:', err);
+          const audioUrl = URL.createObjectURL(rawBlob);
+          setRecordingState((prev) => ({
+            ...prev,
+            isRecording: false,
+            recordedBlob: rawBlob,
+            recordedUrl: audioUrl,
+          }));
+        }
       };
 
       // Start recording & backing track sync
-      mediaRecorder.start();
+      mediaRecorder.start(100);
       audioEngine.play(settings, false); // Play instrumental
 
       setRecordingState((prev) => ({
@@ -197,7 +226,7 @@ export const KaraokeRecordingBooth: React.FC<KaraokeRecordingBoothProps> = ({
                 </span>
                 <a
                   href={recordingState.recordedUrl}
-                  download={`Karaoke_Performance_${Date.now()}.webm`}
+                  download={`Karaoke_Performance_${Date.now()}.wav`}
                   className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
