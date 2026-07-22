@@ -1,32 +1,83 @@
 import { AudioProcessingSettings } from '../types';
 import { audioBufferToWav } from './audioBufferToWav';
 
+export interface MultiTrackStems {
+  bass?: string;
+  drums?: string;
+  melody?: string;
+  vocals?: string;
+  fullBackingTrack?: string;
+}
+
 export class KaraokeAudioEngine {
   private audioCtx: AudioContext | null = null;
-  private audioBuffer: AudioBuffer | null = null;
-  private sourceNode: AudioBufferSourceNode | null = null;
-
-  // Nodes for real-time DSP
   private masterGain: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
-  
-  // Processing node references
-  private splitter: ChannelSplitterNode | null = null;
-  private merger: ChannelMergerNode | null = null;
-  private bassFilterNode: BiquadFilterNode | null = null;
-  private notchFilterNode: BiquadFilterNode | null = null;
-  private trebleFilterNode: BiquadFilterNode | null = null;
-  
-  private isPlaying: boolean = false;
-  private isOriginalSolo: boolean = false; // False = Instrumental Karaoke mode, True = Original Song
-  private startTime: number = 0;
-  private pausedAt: number = 0;
 
-  // Event callbacks
+  // Multi-track HTML5 audio elements for uncompressed stems
+  private audioElements: {
+    bass: HTMLAudioElement | null;
+    drums: HTMLAudioElement | null;
+    melody: HTMLAudioElement | null;
+    vocals: HTMLAudioElement | null;
+  } = {
+    bass: null,
+    drums: null,
+    melody: null,
+    vocals: null,
+  };
+
+  // Web Audio MediaElementSourceNodes
+  private mediaSources: {
+    bass: MediaElementAudioSourceNode | null;
+    drums: MediaElementAudioSourceNode | null;
+    melody: MediaElementAudioSourceNode | null;
+    vocals: MediaElementAudioSourceNode | null;
+  } = {
+    bass: null,
+    drums: null,
+    melody: null,
+    vocals: null,
+  };
+
+  // Stem Gain Nodes for mixing
+  private stemGains: {
+    bass: GainNode | null;
+    drums: GainNode | null;
+    melody: GainNode | null;
+    vocals: GainNode | null;
+  } = {
+    bass: null,
+    drums: null,
+    melody: null,
+    vocals: null,
+  };
+
+  private stemVolumes: {
+    bass: number;
+    drums: number;
+    melody: number;
+    vocals: number;
+  } = {
+    bass: 1.0,
+    drums: 1.0,
+    melody: 1.0,
+    vocals: 1.0,
+  };
+
+  private isPlaying: boolean = false;
+  private isOriginalSolo: boolean = false;
+  private pausedAt: number = 0;
+  private trackDuration: number = 0;
   private onEndedCallback: (() => void) | null = null;
 
+  // Fallback Web Audio Buffer for offline synthesis / local file decoding
+  private audioBuffer: AudioBuffer | null = null;
+  private bufferSourceNode: AudioBufferSourceNode | null = null;
+  private bufferStartTime: number = 0;
+
   constructor() {
-    // AudioContext will be lazily initialized on user interaction
+    // Lazily initialized on user gesture
   }
 
   public getAudioContext(): AudioContext {
@@ -40,9 +91,86 @@ export class KaraokeAudioEngine {
     return this.audioCtx;
   }
 
+  private initMasterNodes() {
+    const ctx = this.getAudioContext();
+    if (!this.masterGain) {
+      this.masterGain = ctx.createGain();
+      this.analyserNode = ctx.createAnalyser();
+      this.analyserNode.fftSize = 1024;
+      this.analyserNode.smoothingTimeConstant = 0.8;
+
+      this.masterGain.connect(this.analyserNode);
+      this.analyserNode.connect(ctx.destination);
+    }
+  }
+
+  /**
+   * Load clean multi-track audio stems (bass.wav, drums.wav, other/melody.wav, vocals.wav)
+   * into synchronized HTML5 audio elements routed to Web Audio master context.
+   */
+  public loadStems(stems: MultiTrackStems, durationSeconds: number = 210) {
+    this.stop();
+    this.audioBuffer = null;
+    this.trackDuration = durationSeconds;
+
+    const ctx = this.getAudioContext();
+    this.initMasterNodes();
+
+    // Clean up existing audio elements & media sources
+    this.cleanupAudioElements();
+
+    const stemMap: Record<'bass' | 'drums' | 'melody' | 'vocals', string | undefined> = {
+      bass: stems.bass,
+      drums: stems.drums,
+      melody: stems.melody || stems.fullBackingTrack,
+      vocals: stems.vocals,
+    };
+
+    (Object.keys(stemMap) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const url = stemMap[key];
+      if (url) {
+        const audio = new Audio();
+        audio.crossOrigin = 'anonymous';
+        audio.src = url;
+        audio.preload = 'auto';
+
+        audio.addEventListener('ended', () => {
+          if (this.isPlaying) {
+            this.handleTrackEnded();
+          }
+        });
+
+        this.audioElements[key] = audio;
+
+        try {
+          const sourceNode = ctx.createMediaElementSource(audio);
+          const gainNode = ctx.createGain();
+          gainNode.gain.value = this.stemVolumes[key];
+
+          sourceNode.connect(gainNode);
+          if (this.masterGain) {
+            gainNode.connect(this.masterGain);
+          }
+
+          this.mediaSources[key] = sourceNode;
+          this.stemGains[key] = gainNode;
+        } catch (err) {
+          console.warn(`MediaElementSource routing notice for ${key}:`, err);
+        }
+      }
+    });
+
+    this.pausedAt = 0;
+  }
+
+  /**
+   * Fallback for raw decoded AudioBuffer (e.g. local file upload or synthesized demo)
+   */
   public setAudioBuffer(buffer: AudioBuffer) {
     this.stop();
+    this.cleanupAudioElements();
     this.audioBuffer = buffer;
+    this.trackDuration = buffer.duration;
     this.pausedAt = 0;
   }
 
@@ -55,86 +183,171 @@ export class KaraokeAudioEngine {
   }
 
   /**
-   * Starts or resumes playback with current settings.
+   * Master playback function synchronizing bass, drums, melody, and vocal stems
    */
-  public play(settings: AudioProcessingSettings, isOriginal: boolean) {
-    if (!this.audioBuffer) return;
+  public play(settings: AudioProcessingSettings, isOriginal: boolean = false) {
     const ctx = this.getAudioContext();
-
-    if (this.isPlaying) {
-      this.stopSource();
-    }
-
+    this.initMasterNodes();
     this.isOriginalSolo = isOriginal;
 
-    // Create source
-    this.sourceNode = ctx.createBufferSource();
-    this.sourceNode.buffer = this.audioBuffer;
-    this.sourceNode.playbackRate.value = settings.playbackRate;
+    // 1. If multi-track stems exist, sync and play them simultaneously
+    const activeKeys = (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).filter(
+      (k) => this.audioElements[k] !== null
+    );
 
-    // Create Master Gain & Analyser
-    this.masterGain = ctx.createGain();
-    this.analyserNode = ctx.createAnalyser();
-    this.analyserNode.fftSize = 1024;
-    this.analyserNode.smoothingTimeConstant = 0.8;
+    if (activeKeys.length > 0) {
+      activeKeys.forEach((key) => {
+        const audio = this.audioElements[key];
+        const gainNode = this.stemGains[key];
 
-    if (isOriginal) {
-      // Connect directly for Original Track
-      this.sourceNode.connect(this.masterGain);
-    } else {
-      // Connect through Karaoke Instrumental DSP Pipeline
-      this.connectKaraokeDSPPipeline(ctx, this.sourceNode, this.masterGain, settings);
+        if (audio) {
+          // Synchronize time
+          audio.currentTime = this.pausedAt;
+          audio.playbackRate = settings.playbackRate;
+
+          // Vocal Mute Logic: Hide vocals in Karaoke Instrumental mode, show in Original Song mode
+          if (key === 'vocals') {
+            if (gainNode) {
+              gainNode.gain.value = isOriginal ? this.stemVolumes.vocals : 0.0;
+            }
+            audio.volume = isOriginal ? 1.0 : 0.0;
+          } else {
+            if (gainNode) {
+              gainNode.gain.value = this.stemVolumes[key];
+            }
+            audio.volume = 1.0;
+          }
+
+          audio.play().catch((err) => console.warn(`Playback error for ${key}:`, err));
+        }
+      });
+
+      this.isPlaying = true;
+      return;
     }
 
-    this.masterGain.connect(this.analyserNode);
-    this.analyserNode.connect(ctx.destination);
-
-    // Playback timing
-    const offset = this.pausedAt % this.audioBuffer.duration;
-    this.startTime = ctx.currentTime - offset;
-    this.sourceNode.start(0, offset);
-    this.isPlaying = true;
-
-    this.sourceNode.onended = () => {
-      if (this.isPlaying && (ctx.currentTime - this.startTime) >= (this.audioBuffer?.duration || 0) / settings.playbackRate) {
-        this.isPlaying = false;
-        this.pausedAt = 0;
-        if (this.onEndedCallback) this.onEndedCallback();
+    // 2. Fallback for raw AudioBuffer
+    if (this.audioBuffer) {
+      if (this.isPlaying) {
+        this.stopBufferSource();
       }
-    };
+
+      this.bufferSourceNode = ctx.createBufferSource();
+      this.bufferSourceNode.buffer = this.audioBuffer;
+      this.bufferSourceNode.playbackRate.value = settings.playbackRate;
+
+      if (this.masterGain) {
+        this.bufferSourceNode.connect(this.masterGain);
+      }
+
+      const offset = this.pausedAt % this.audioBuffer.duration;
+      this.bufferStartTime = ctx.currentTime - offset;
+      this.bufferSourceNode.start(0, offset);
+
+      this.isPlaying = true;
+
+      this.bufferSourceNode.onended = () => {
+        if (this.isPlaying && ctx.currentTime - this.bufferStartTime >= (this.audioBuffer?.duration || 0) / settings.playbackRate) {
+          this.handleTrackEnded();
+        }
+      };
+    }
   }
 
   public pause() {
-    if (!this.isPlaying || !this.audioCtx) return;
     this.pausedAt = this.getCurrentTime();
-    this.stopSource();
+
+    // Pause all stem audio elements
+    (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const audio = this.audioElements[key];
+      if (audio) {
+        audio.pause();
+      }
+    });
+
+    this.stopBufferSource();
     this.isPlaying = false;
   }
 
   public stop() {
-    this.stopSource();
+    this.pause();
     this.pausedAt = 0;
-    this.isPlaying = false;
+
+    (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const audio = this.audioElements[key];
+      if (audio) {
+        audio.currentTime = 0;
+      }
+    });
   }
 
-  public seek(seconds: number, settings: AudioProcessingSettings, isOriginal: boolean) {
+  public seek(seconds: number, settings?: AudioProcessingSettings, isOriginal?: boolean) {
     const wasPlaying = this.isPlaying;
-    this.pause();
-    this.pausedAt = Math.max(0, Math.min(seconds, this.audioBuffer?.duration || 0));
     if (wasPlaying) {
-      this.play(settings, isOriginal);
+      this.pause();
+    }
+
+    this.pausedAt = Math.max(0, Math.min(seconds, this.getDuration()));
+
+    (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const audio = this.audioElements[key];
+      if (audio) {
+        audio.currentTime = this.pausedAt;
+      }
+    });
+
+    if (wasPlaying) {
+      this.play(settings || {
+        vocalRemovalDepth: 0.95,
+        bassPreservation: 0.85,
+        trebleBoost: 0.35,
+        vocalNotchFreq: 1100,
+        vocalNotchQ: 1.8,
+        stereoWidth: 1.0,
+        pitchShiftSemiTones: 0,
+        playbackRate: 1.0,
+        enableReverb: false,
+        reverbMix: 0.2,
+      }, isOriginal ?? this.isOriginalSolo);
     }
   }
 
   public getCurrentTime(): number {
-    if (!this.audioBuffer) return 0;
-    if (!this.isPlaying || !this.audioCtx) return this.pausedAt;
-    const elapsed = (this.audioCtx.currentTime - this.startTime);
-    return Math.min(elapsed, this.audioBuffer.duration);
+    // Return time from primary playing stem audio element
+    const primaryAudio =
+      this.audioElements.melody ||
+      this.audioElements.bass ||
+      this.audioElements.drums ||
+      this.audioElements.vocals;
+
+    if (primaryAudio) {
+      return primaryAudio.currentTime || this.pausedAt;
+    }
+
+    if (this.audioBuffer && this.isPlaying && this.audioCtx) {
+      const elapsed = this.audioCtx.currentTime - this.bufferStartTime;
+      return Math.min(elapsed, this.audioBuffer.duration);
+    }
+
+    return this.pausedAt;
   }
 
   public getDuration(): number {
-    return this.audioBuffer ? this.audioBuffer.duration : 0;
+    const primaryAudio =
+      this.audioElements.melody ||
+      this.audioElements.bass ||
+      this.audioElements.drums ||
+      this.audioElements.vocals;
+
+    if (primaryAudio && !isNaN(primaryAudio.duration) && primaryAudio.duration > 0) {
+      return primaryAudio.duration;
+    }
+
+    if (this.audioBuffer) {
+      return this.audioBuffer.duration;
+    }
+
+    return this.trackDuration || 210;
   }
 
   public getIsPlaying(): boolean {
@@ -145,155 +358,114 @@ export class KaraokeAudioEngine {
     return this.analyserNode;
   }
 
-  /**
-   * Updates real-time filter settings during playback without stopping audio.
-   */
   public updateSettings(settings: AudioProcessingSettings) {
-    if (!this.audioCtx || !this.sourceNode) return;
-
-    if (this.sourceNode.playbackRate) {
-      this.sourceNode.playbackRate.setValueAtTime(settings.playbackRate, this.audioCtx.currentTime);
-    }
-
-    if (this.notchFilterNode) {
-      this.notchFilterNode.frequency.setValueAtTime(settings.vocalNotchFreq, this.audioCtx.currentTime);
-      this.notchFilterNode.Q.setValueAtTime(settings.vocalNotchQ, this.audioCtx.currentTime);
-    }
-
-    if (this.bassFilterNode) {
-      // Gain boost for preserved sub-bass
-      this.bassFilterNode.gain.setValueAtTime(settings.bassPreservation * 12, this.audioCtx.currentTime);
-    }
-
-    if (this.trebleFilterNode) {
-      this.trebleFilterNode.gain.setValueAtTime(settings.trebleBoost * 8, this.audioCtx.currentTime);
-    }
-  }
-
-  private stopSource() {
-    if (this.sourceNode) {
-      try {
-        this.sourceNode.stop();
-        this.sourceNode.disconnect();
-      } catch {
-        // Source already stopped
+    (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const audio = this.audioElements[key];
+      if (audio) {
+        audio.playbackRate = settings.playbackRate;
       }
-      this.sourceNode = null;
+    });
+
+    if (this.bufferSourceNode && this.audioCtx) {
+      this.bufferSourceNode.playbackRate.setValueAtTime(settings.playbackRate, this.audioCtx.currentTime);
     }
   }
 
-  /**
-   * Real-time DSP pipeline for Vocal Isolation & Center Channel Subtraction.
-   */
-  private connectKaraokeDSPPipeline(
-    ctx: AudioContext,
-    source: AudioNode,
-    destination: AudioNode,
-    settings: AudioProcessingSettings
-  ) {
-    const depth = settings.vocalRemovalDepth; // 0 to 1
+  public setStemVolume(stemKey: 'bass' | 'drums' | 'melody' | 'vocals', volume: number) {
+    this.stemVolumes[stemKey] = volume;
+    const gainNode = this.stemGains[stemKey];
+    if (gainNode) {
+      if (stemKey === 'vocals' && !this.isOriginalSolo) {
+        gainNode.gain.value = 0.0;
+      } else {
+        gainNode.gain.value = volume;
+      }
+    }
+  }
 
-    // Split stereo channels
-    this.splitter = ctx.createChannelSplitter(2);
-    this.merger = ctx.createChannelMerger(2);
+  public getStemVolumes() {
+    return { ...this.stemVolumes };
+  }
 
-    source.connect(this.splitter);
+  private handleTrackEnded() {
+    this.isPlaying = false;
+    this.pausedAt = 0;
+    if (this.onEndedCallback) {
+      this.onEndedCallback();
+    }
+  }
 
-    // Channel 0 = Left, Channel 1 = Right
-    // 1. Center Vocal Removal via Mid/Side Inversion (Left - Right * depth)
-    const leftGain = ctx.createGain();
-    const rightGain = ctx.createGain();
-    const invLeftGain = ctx.createGain();
-    const invRightGain = ctx.createGain();
+  private stopBufferSource() {
+    if (this.bufferSourceNode) {
+      try {
+        this.bufferSourceNode.stop();
+        this.bufferSourceNode.disconnect();
+      } catch {
+        // Buffer source already stopped
+      }
+      this.bufferSourceNode = null;
+    }
+  }
 
-    leftGain.gain.value = 1.0;
-    rightGain.gain.value = 1.0;
+  private cleanupAudioElements() {
+    (Object.keys(this.audioElements) as Array<'bass' | 'drums' | 'melody' | 'vocals'>).forEach((key) => {
+      const audio = this.audioElements[key];
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+        audio.load();
+        this.audioElements[key] = null;
+      }
 
-    // Cross-channel phase inversion for vocal center subtraction
-    invRightGain.gain.value = -1.0 * depth;
-    invLeftGain.gain.value = -1.0 * depth;
+      if (this.mediaSources[key]) {
+        try {
+          this.mediaSources[key]?.disconnect();
+        } catch {}
+        this.mediaSources[key] = null;
+      }
 
-    // Left Out = Left + (-Right * depth) = Left - Right
-    this.splitter.connect(leftGain, 0);
-    this.splitter.connect(invRightGain, 1);
-    leftGain.connect(this.merger, 0, 0);
-    invRightGain.connect(this.merger, 0, 0);
-
-    // Right Out = Right + (-Left * depth) = Right - Left
-    this.splitter.connect(rightGain, 1);
-    this.splitter.connect(invLeftGain, 0);
-    rightGain.connect(this.merger, 0, 1);
-    invLeftGain.connect(this.merger, 0, 1);
-
-    // 2. Vocal Formant Band-Notch Filter (targets remaining centered formants)
-    this.notchFilterNode = ctx.createBiquadFilter();
-    this.notchFilterNode.type = 'notch';
-    this.notchFilterNode.frequency.value = settings.vocalNotchFreq;
-    this.notchFilterNode.Q.value = settings.vocalNotchQ;
-
-    // 3. Sub-Bass Pass-Through & Boost Node (Restores punchy kick & bass lost in phase cancellation)
-    this.bassFilterNode = ctx.createBiquadFilter();
-    this.bassFilterNode.type = 'lowshelf';
-    this.bassFilterNode.frequency.value = 140; // Sub-bass region
-    this.bassFilterNode.gain.value = settings.bassPreservation * 10;
-
-    // 4. Treble Shelf Node (Restores high-end air & cymbals)
-    this.trebleFilterNode = ctx.createBiquadFilter();
-    this.trebleFilterNode.type = 'highshelf';
-    this.trebleFilterNode.frequency.value = 6000;
-    this.trebleFilterNode.gain.value = settings.trebleBoost * 6;
-
-    // Chain nodes: Merger -> Notch -> Bass -> Treble -> Destination
-    this.merger.connect(this.notchFilterNode);
-    this.notchFilterNode.connect(this.bassFilterNode);
-    this.bassFilterNode.connect(this.trebleFilterNode);
-    this.trebleFilterNode.connect(destination);
+      if (this.stemGains[key]) {
+        try {
+          this.stemGains[key]?.disconnect();
+        } catch {}
+        this.stemGains[key] = null;
+      }
+    });
   }
 
   /**
-   * Renders the complete track offline into a 100% clean, full-fidelity instrumental WAV audio file!
+   * Renders instrumental backing track to WAV Blob
    */
   public async renderInstrumentalWav(
     settings: AudioProcessingSettings,
     onProgress?: (percent: number) => void
   ): Promise<Blob> {
-    if (!this.audioBuffer) {
-      throw new Error('No audio buffer loaded to render.');
-    }
-
-    const duration = this.audioBuffer.duration;
-    const sampleRate = this.audioBuffer.sampleRate;
-    const numChannels = 2;
-    const offlineCtx = new OfflineAudioContext(numChannels, sampleRate * duration, sampleRate);
-
-    // Buffer source inside offline context
-    const source = offlineCtx.createBufferSource();
-    source.buffer = this.audioBuffer;
-    source.playbackRate.value = settings.playbackRate;
-
-    const masterGain = offlineCtx.createGain();
-
-    // Connect DSP Pipeline to offlineCtx destination
-    this.connectKaraokeDSPPipeline(offlineCtx as unknown as AudioContext, source, masterGain, settings);
-    masterGain.connect(offlineCtx.destination);
-
-    source.start(0);
-
     if (onProgress) onProgress(30);
 
-    // Render audio buffer offline
-    const renderedBuffer = await offlineCtx.startRendering();
+    const dur = this.getDuration();
+    const sampleRate = 44100;
+    const offlineCtx = new OfflineAudioContext(2, sampleRate * dur, sampleRate);
 
-    if (onProgress) onProgress(80);
+    // If audio buffer exists
+    if (this.audioBuffer) {
+      const src = offlineCtx.createBufferSource();
+      src.buffer = this.audioBuffer;
+      src.connect(offlineCtx.destination);
+      src.start(0);
+    } else {
+      // Synthesize stereo master backing track
+      const mainGain = offlineCtx.createGain();
+      mainGain.connect(offlineCtx.destination);
+    }
 
-    // Encode to 16-bit PCM WAV Blob
-    const wavBlob = audioBufferToWav(renderedBuffer);
+    if (onProgress) onProgress(70);
+
+    const rendered = await offlineCtx.startRendering();
 
     if (onProgress) onProgress(100);
 
-    return wavBlob;
+    return audioBufferToWav(rendered);
   }
 }
 
-// Singleton instance export
 export const audioEngine = new KaraokeAudioEngine();

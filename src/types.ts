@@ -13,6 +13,13 @@ export interface TrackMetadata {
   instrumentalStreamUrl?: string;
   vocalsStreamUrl?: string;
   isCloudStream?: boolean;
+  stems?: {
+    bass?: string;
+    drums?: string;
+    melody?: string;
+    vocals?: string;
+    fullBackingTrack?: string;
+  };
 }
 
 export interface AudioProcessingSettings {

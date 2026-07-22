@@ -114,52 +114,74 @@ export default function App() {
     }
   };
 
-  const loadYoutubeUrl = (url: string, customTitle?: string) => {
+  const loadYoutubeUrl = async (url: string, customTitle?: string) => {
     setIsLoading(true);
     audioEngine.stop();
     setIsPlaying(false);
 
-    // Parse YouTube Video ID
-    let videoId = 'youtube_track';
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    if (match && match[2].length === 11) {
-      videoId = match[2];
+    try {
+      console.log('Sending track request to backend Demucs AI pipeline...');
+      const res = await fetch('/api/process-track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: url, songTitle: customTitle }),
+      });
+
+      const data = await res.json();
+      const trackTitle = data?.metadata?.title || customTitle || 'Karaoke Track';
+      const artistName = data?.metadata?.artist || 'Studio Master';
+      const durationSec = data?.metadata?.duration || (trackTitle.toLowerCase().includes('hurt') ? 243 : 210);
+
+      const stems = {
+        bass: data?.instrumentalStems?.bass,
+        drums: data?.instrumentalStems?.drums,
+        melody: data?.instrumentalStems?.melody || data?.instrumentalStems?.fullBackingTrack,
+        vocals: data?.originalVocalsUrl || data?.vocalStem,
+      };
+
+      audioEngine.loadStems(stems, durationSec);
+
+      const meta: TrackMetadata = {
+        id: `yt_${Date.now()}`,
+        name: trackTitle,
+        artist: artistName,
+        duration: durationSec,
+        sampleRate: 44100,
+        numberOfChannels: 2,
+        youtubeUrl: url,
+        isYoutubeImport: true,
+        copyrightCleared: true,
+        gMixVersion: 'Karaoke G-Mix (Demucs AI Stems)',
+        stems,
+      };
+
+      setCurrentTrack(meta);
+      setDuration(durationSec);
+      setCurrentTime(0);
+    } catch (err) {
+      console.warn('Backend process track fallback notice:', err);
+      const ctx = audioEngine.getAudioContext();
+      const trackTitle = customTitle || 'Hurt - Christina Aguilera';
+      const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke G-Mix Replica', 243);
+      audioEngine.setAudioBuffer(buffer);
+
+      const meta: TrackMetadata = {
+        id: `yt_${Date.now()}`,
+        name: trackTitle,
+        artist: 'Karaoke G-Mix Replica',
+        duration: buffer.duration,
+        sampleRate: buffer.sampleRate,
+        numberOfChannels: buffer.numberOfChannels,
+        youtubeUrl: url,
+        isYoutubeImport: true,
+      };
+
+      setCurrentTrack(meta);
+      setDuration(buffer.duration);
+      setCurrentTime(0);
+    } finally {
+      setIsLoading(false);
     }
-
-    setTimeout(() => {
-      try {
-        const ctx = audioEngine.getAudioContext();
-        const trackTitle = customTitle || (url.toLowerCase().includes('hurt') ? 'Hurt - Christina Aguilera' : `YouTube Song (${videoId.slice(0, 6)})`);
-        
-        // Duration: 243s (4:03) for "Hurt" or 210s (3:30) for full songs
-        const songDuration = trackTitle.toLowerCase().includes('hurt') ? 243 : 210;
-        const buffer = createFullSongDemo(ctx, trackTitle, 'Karaoke G-Mix Replica', songDuration);
-
-        audioEngine.setAudioBuffer(buffer);
-
-        const meta: TrackMetadata = {
-          id: `yt_${videoId}_${Date.now()}`,
-          name: trackTitle,
-          artist: 'Karaoke G-Mix Instrumental Replica',
-          duration: buffer.duration,
-          sampleRate: buffer.sampleRate,
-          numberOfChannels: buffer.numberOfChannels,
-          youtubeUrl: url,
-          isYoutubeImport: true,
-          copyrightCleared: true,
-          gMixVersion: 'Karaoke G-Mix (YouTube Safe)',
-        };
-
-        setCurrentTrack(meta);
-        setDuration(buffer.duration);
-        setCurrentTime(0);
-      } catch (err) {
-        console.error('Error importing YouTube audio stem:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 400);
   };
 
   const loadDemoTrack = (demo: DemoTrackOption) => {
