@@ -240,6 +240,44 @@ export class KaraokeAudioEngine {
     this.onEndedCallback = cb;
   }
 
+  private disconnectDSPGraph() {
+    if (this.directGain) {
+      try { this.directGain.disconnect(); } catch (e) {}
+      this.directGain = null;
+    }
+    if (this.vocalRemovedGain) {
+      try { this.vocalRemovedGain.disconnect(); } catch (e) {}
+      this.vocalRemovedGain = null;
+    }
+    if (this.notchFilter) {
+      try { this.notchFilter.disconnect(); } catch (e) {}
+      this.notchFilter = null;
+    }
+    if (this.trebleFilter) {
+      try { this.trebleFilter.disconnect(); } catch (e) {}
+      this.trebleFilter = null;
+    }
+    if (this.bassGain) {
+      try { this.bassGain.disconnect(); } catch (e) {}
+      this.bassGain = null;
+    }
+  }
+
+  public setOriginalMode(isOriginal: boolean, settings: AudioProcessingSettings) {
+    this.isOriginalSolo = isOriginal;
+    const ctx = this.audioCtx;
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    if (this.directGain) {
+      this.directGain.gain.setValueAtTime(isOriginal ? 1.0 : 0.0, now);
+    }
+    if (this.vocalRemovedGain) {
+      const remGain = isOriginal ? 0.0 : Math.min(1.0, settings.vocalRemovalDepth || 0.95);
+      this.vocalRemovedGain.gain.setValueAtTime(remGain, now);
+    }
+  }
+
   private connectSourceToDSPGraph(
     sourceNode: AudioNode,
     settings: AudioProcessingSettings,
@@ -247,16 +285,17 @@ export class KaraokeAudioEngine {
   ) {
     const ctx = this.getAudioContext();
     this.initMasterNodes();
+    this.disconnectDSPGraph();
 
     if (!this.masterGain) return;
 
-    // 1. Direct path for Original Song
+    // 1. Direct path for Original Song (Contains full vocals and lyrics)
     this.directGain = ctx.createGain();
     this.directGain.gain.setValueAtTime(isOriginal ? 1.0 : 0.0, ctx.currentTime);
     sourceNode.connect(this.directGain);
     this.directGain.connect(this.masterGain);
 
-    // 2. Vocal Removal Path for Karaoke Instrumental Mode
+    // 2. Vocal Removal Path for Karaoke Instrumental Mode (Cancels center-panned vocals)
     this.vocalRemovedGain = ctx.createGain();
     const targetRemGain = isOriginal ? 0.0 : Math.min(1.0, settings.vocalRemovalDepth || 0.95);
     this.vocalRemovedGain.gain.setValueAtTime(targetRemGain, ctx.currentTime);
@@ -323,15 +362,7 @@ export class KaraokeAudioEngine {
       }
     }
     this.initMasterNodes();
-    this.isOriginalSolo = isOriginal;
-
-    // Update gain states for DSP nodes
-    if (this.directGain) {
-      this.directGain.gain.setValueAtTime(isOriginal ? 1.0 : 0.0, ctx.currentTime);
-    }
-    if (this.vocalRemovedGain) {
-      this.vocalRemovedGain.gain.setValueAtTime(isOriginal ? 0.0 : Math.min(1.0, settings.vocalRemovalDepth || 0.95), ctx.currentTime);
-    }
+    this.setOriginalMode(isOriginal, settings);
 
     if (this.vocalsAudio && this.vocalsGain) {
       this.vocalsGain.gain.value = isOriginal ? 1.0 : 0.0;

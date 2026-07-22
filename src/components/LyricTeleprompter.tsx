@@ -125,6 +125,28 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
       const cleanTrack = sanitizeTrackQuery(trackName);
       const cleanArtist = sanitizeTrackQuery(artistName || '');
 
+      // 1. Try Direct LRCLIB GET endpoint first for exact track match
+      if (cleanTrack) {
+        try {
+          const directUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTrack)}&artist_name=${encodeURIComponent(cleanArtist)}`;
+          const getRes = await fetch(directUrl);
+          if (getRes.ok) {
+            const getData = await getRes.json();
+            if (getData && getData.syncedLyrics && getData.syncedLyrics.trim().length > 0) {
+              const parsed = parseLrcString(getData.syncedLyrics);
+              if (parsed.length > 0) {
+                setLyrics(parsed);
+                setSourceLabel(`LRCLIB Synced (${getData.artistName || cleanArtist || 'Verified'})`);
+                setIsFetchingLyrics(false);
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          // ignore & fallback to search
+        }
+      }
+
       let searchQuery = cleanTrack;
       if (cleanArtist && !cleanTrack.toLowerCase().includes(cleanArtist.toLowerCase())) {
         searchQuery = `${cleanArtist} ${cleanTrack}`.trim();
@@ -148,7 +170,7 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
             }
           }
 
-          // Fallback to plainLyrics in LRCLIB with auto-spaced mathematical timestamps over song duration
+          // Fallback to plainLyrics in LRCLIB
           const plainMatch = searchData.find((item: any) => item.plainLyrics && item.plainLyrics.trim().length > 0);
           if (plainMatch && plainMatch.plainLyrics) {
             const plainLines = plainMatch.plainLyrics.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
@@ -203,14 +225,16 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
     fetchLrclibLyrics(currentTrack.name, currentTrack.artist);
   }, [currentTrack]);
 
-  // Compute active line index: currentTime >= line.time, but < next line.time
-  const activeLineIndex = lyrics.reduce((activeIdx, line, idx) => {
-    const currentSec = exactMs / 1000;
-    if (currentSec >= line.time) {
-      return idx;
+  // Compute active line index: currentTime >= line.time
+  const currentSec = exactMs / 1000;
+  let activeLineIndex = -1;
+  for (let idx = 0; idx < lyrics.length; idx++) {
+    if (currentSec >= lyrics[idx].time) {
+      activeLineIndex = idx;
+    } else {
+      break;
     }
-    return activeIdx;
-  }, 0);
+  }
 
   // Auto-scroll centered line smoothly into view
   useEffect(() => {

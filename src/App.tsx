@@ -294,9 +294,7 @@ function expandAudioBufferToDuration(
 
   const handleToggleOriginal = (val: boolean) => {
     setIsOriginal(val);
-    if (isPlaying) {
-      audioEngine.play(settings, val);
-    }
+    audioEngine.setOriginalMode(val, settings);
   };
 
   const handleExportWav = async () => {
