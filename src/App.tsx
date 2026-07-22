@@ -37,7 +37,15 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
 
+  const audioRef = useRef<HTMLAudioElement>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Attach persistent audio element to audioEngine on mount
+  useEffect(() => {
+    if (audioRef.current) {
+      audioEngine.attachPersistentAudioElement(audioRef.current);
+    }
+  }, []);
 
   // Initialize with demo track on initial launch so user can play immediately!
   useEffect(() => {
@@ -119,6 +127,14 @@ export default function App() {
     audioEngine.stop();
     setIsPlaying(false);
 
+    // USER-GESTURE AUDIO BRIDGE UNLOCK
+    if (audioRef.current) {
+      audioRef.current
+        .play()
+        .then(() => audioRef.current?.pause())
+        .catch((e) => console.log('Unlocked audio context', e));
+    }
+
     try {
       console.log('Sending track request to backend Demucs AI pipeline...');
       const res = await fetch('/api/process-track', {
@@ -135,11 +151,26 @@ export default function App() {
       const stems = {
         bass: data?.instrumentalStems?.bass,
         drums: data?.instrumentalStems?.drums,
-        melody: data?.instrumentalStems?.melody || data?.instrumentalStems?.fullBackingTrack,
+        melody: data?.instrumentalStems?.melody || data?.instrumentalStems?.fullBackingTrack || data?.instrumentalStems?.other,
         vocals: data?.originalVocalsUrl || data?.vocalStem,
       };
 
-      audioEngine.loadStems(stems, durationSec);
+      await audioEngine.loadStems(stems, durationSec);
+
+      // DYNAMIC RESOURCE LOADING: Update existing audio element source & trigger playback
+      const melodyUrl = stems.melody;
+      if (audioRef.current && melodyUrl) {
+        audioRef.current.src = melodyUrl;
+        audioRef.current.load();
+        audioRef.current
+          .play()
+          .then(() => {
+            setIsPlaying(true);
+          })
+          .catch((e) => {
+            console.warn('Autoplay audio bridge notice:', e);
+          });
+      }
 
       const meta: TrackMetadata = {
         id: `yt_${Date.now()}`,
@@ -288,6 +319,7 @@ export default function App() {
           onLoadYoutubeUrl={loadYoutubeUrl}
           isLoading={isLoading}
           currentTrack={currentTrack}
+          audioRef={audioRef}
         />
 
         {/* Real-time Spectrum Visualizer */}
@@ -319,9 +351,19 @@ export default function App() {
             currentTrack={currentTrack}
             currentTime={currentTime}
             onSeekTo={handleSeek}
+            audioRef={audioRef}
           />
         )}
       </main>
+
+      {/* Permanently Mounted HTML5 Audio Element for Browser Autoplay Unlock */}
+      <audio
+        ref={audioRef}
+        id="persistent-audio-player"
+        className="hidden"
+        crossOrigin="anonymous"
+        preload="auto"
+      />
 
       {/* Bottom Transport Player Bar */}
       <PlayerBar

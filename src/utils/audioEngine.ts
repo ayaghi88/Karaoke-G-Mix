@@ -48,6 +48,33 @@ export class KaraokeAudioEngine {
     return this.audioCtx;
   }
 
+  public attachPersistentAudioElement(element: HTMLAudioElement) {
+    if (!element) return;
+    this.singleAudio = element;
+    this.singleAudio.crossOrigin = 'anonymous';
+    this.singleAudio.preload = 'auto';
+
+    this.singleAudio.onended = () => {
+      if (this.isPlaying) {
+        this.handleTrackEnded();
+      }
+    };
+
+    const ctx = this.getAudioContext();
+    this.initMasterNodes();
+
+    try {
+      if (!this.singleMediaSource) {
+        this.singleMediaSource = ctx.createMediaElementSource(this.singleAudio);
+        if (this.masterGain) {
+          this.singleMediaSource.connect(this.masterGain);
+        }
+      }
+    } catch (err) {
+      console.warn('MediaElementSource initialization info:', err);
+    }
+  }
+
   private initMasterNodes() {
     const ctx = this.getAudioContext();
     if (!this.masterGain) {

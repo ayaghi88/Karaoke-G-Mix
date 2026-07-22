@@ -9,6 +9,7 @@ interface AudioUploaderProps {
   onLoadYoutubeUrl: (url: string, title?: string) => void;
   isLoading: boolean;
   currentTrack: TrackMetadata | null;
+  audioRef?: React.RefObject<HTMLAudioElement>;
 }
 
 export const AudioUploader: React.FC<AudioUploaderProps> = ({
@@ -17,6 +18,7 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
   onLoadYoutubeUrl,
   isLoading,
   currentTrack,
+  audioRef,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -52,17 +54,32 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
     }
   };
 
+  const unlockAudioContext = () => {
+    if (audioRef?.current) {
+      audioRef.current
+        .play()
+        .then(() => {
+          if (audioRef.current) audioRef.current.pause();
+        })
+        .catch((e) => console.log('Unlocked audio context', e));
+    }
+  };
+
   const handleYoutubeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!youtubeUrl.trim()) return;
+    unlockAudioContext();
     onLoadYoutubeUrl(youtubeUrl, youtubeTitle.trim() || undefined);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!artistInput.trim() || !songInput.trim()) return;
+    unlockAudioContext();
     const combinedTitle = `${songInput.trim()} - ${artistInput.trim()}`;
-    const sanitizedSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(artistInput.trim() + ' ' + songInput.trim() + ' Official Audio')}`;
+    const sanitizedSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(
+      artistInput.trim() + ' ' + songInput.trim() + ' Official Audio'
+    )}`;
     onLoadYoutubeUrl(sanitizedSearch, combinedTitle);
   };
 
