@@ -404,14 +404,14 @@ function getFallbackEnterpriseLyrics(titleQuery: string) {
 
   const generic = [
     { sec: 0, text: `♪ (Intro - ${titleQuery}) ♪` },
-    { sec: 10, text: 'Verse 1: Sing your heart out to the rhythm' },
-    { sec: 22, text: 'Feel the bass and melody moving in harmony' },
-    { sec: 35, text: 'Chorus: This is your time on the stage!' },
-    { sec: 50, text: 'Let the instrumental carry your vocal performance' },
-    { sec: 68, text: 'Verse 2: Every note brings the song to life' },
-    { sec: 88, text: 'Bridge: Rising melody building up to the climax!' },
-    { sec: 110, text: 'Final Chorus: Sing loud and clear!' },
-    { sec: 135, text: '♪ (Outro Instrumental) ♪' },
+    { sec: 8, text: `Performing ${titleQuery} on Karaoke G-Mix Studio` },
+    { sec: 18, text: 'Feel the rhythm and acoustic depth in every beat' },
+    { sec: 30, text: 'Take the stage and let your vocal performance shine' },
+    { sec: 45, text: 'Dynamic audio engineering with studio precision' },
+    { sec: 62, text: 'Full stereo instrumental backing track' },
+    { sec: 80, text: 'Crystal clear acoustics with punchy low-end response' },
+    { sec: 100, text: 'Singing with passion and pitch perfection' },
+    { sec: 125, text: '♪ (Outro Instrumental Fade) ♪' },
   ];
 
   return generic.map((l) => {

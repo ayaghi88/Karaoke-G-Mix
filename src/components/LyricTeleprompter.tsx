@@ -91,10 +91,10 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
   const fetchLrclibLyrics = async (trackName: string, artistName?: string) => {
     setIsFetchingLyrics(true);
     try {
-      // 1. Try LRCLIB Public API first
+      // 1. Query LRCLIB Public API
       let searchQuery = trackName;
       if (artistName && !trackName.toLowerCase().includes(artistName.toLowerCase())) {
-        searchQuery = `${trackName} ${artistName}`;
+        searchQuery = `${artistName} ${trackName}`;
       }
 
       console.log('Fetching synchronized lyrics from LRCLIB API for:', searchQuery);
@@ -103,15 +103,43 @@ export const LyricTeleprompter: React.FC<LyricTeleprompterProps> = ({
       if (lrclibRes.ok) {
         const searchData = await lrclibRes.json();
         if (Array.isArray(searchData) && searchData.length > 0) {
+          // Check for syncedLyrics first
           const syncedMatch = searchData.find((item: any) => item.syncedLyrics && item.syncedLyrics.trim().length > 0);
           if (syncedMatch && syncedMatch.syncedLyrics) {
             const parsed = parseLrcString(syncedMatch.syncedLyrics);
             if (parsed.length > 0) {
               setLyrics(parsed);
-              setSourceLabel(`LRCLIB Live (${syncedMatch.artistName || 'Verified'})`);
+              setSourceLabel(`LRCLIB Live Synced (${syncedMatch.artistName || 'Verified'})`);
               setIsFetchingLyrics(false);
               return;
             }
+          }
+
+          // Fallback to plainLyrics in LRCLIB with auto-spaced mathematical timestamps over song duration
+          const plainMatch = searchData.find((item: any) => item.plainLyrics && item.plainLyrics.trim().length > 0);
+          if (plainMatch && plainMatch.plainLyrics) {
+            const plainLines = plainMatch.plainLyrics.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+            const dur = currentTrack?.duration || 210;
+            const interval = Math.max(2.5, dur / Math.max(1, plainLines.length));
+
+            const generated: LyricLine[] = plainLines.map((text: string, idx: number) => {
+              const timeSec = idx * interval;
+              return {
+                id: `lrclib-plain-${idx}-${Math.round(timeSec * 1000)}`,
+                time: timeSec,
+                timeMs: Math.round(timeSec * 1000),
+                text,
+                words: text.split(' ').map((w, wIdx) => ({
+                  word: w,
+                  timeMs: Math.round(timeSec * 1000) + wIdx * 300,
+                })),
+              };
+            });
+
+            setLyrics(generated);
+            setSourceLabel(`LRCLIB Auto-Timed (${plainMatch.artistName || 'Verified'})`);
+            setIsFetchingLyrics(false);
+            return;
           }
         }
       }
